@@ -108,6 +108,10 @@ tr.cur td{background:var(--surface2);font-weight:700}tr.past td{color:var(--mute
 td input{font:inherit;font-family:var(--mono);width:96px;text-align:right;background:var(--input);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 7px}
 .chart{padding:12px 8px 6px}
 .chart svg{width:100%;height:auto;display:block}
+svg[data-ch]{touch-action:pan-y;cursor:crosshair;-webkit-user-select:none;user-select:none}
+.readout{min-height:44px;padding:4px 12px 0;display:flex;flex-wrap:wrap;gap:2px 16px;align-items:baseline;font-size:13.5px}
+.readout b{font-family:var(--mono);font-size:17px}
+.readout .when{font-weight:700}
 .legend{display:flex;gap:16px;flex-wrap:wrap;padding:4px 12px 10px;font-size:12.5px;color:var(--muted)}
 .legend i{display:inline-block;width:18px;height:0;border-top:3px solid var(--accent);vertical-align:middle;margin-right:6px}
 .legend i.dash{border-top:2px dashed var(--muted)}
@@ -179,7 +183,7 @@ function uid(){return 'x'+Math.random().toString(36).slice(2,9)}
 function num(v,d){var n=parseFloat(v);return isNaN(n)?(d||0):n}
 
 /* ---------- default data (generic examples) ---------- */
-function newSource(i,amount,anchor){return {name:'Pay source '+(i+1),amount:amount||0,every:14,anchor:anchor||'2026-04-16',start:'2025-12-21',pat:i===0?[0,0,1,1,1,0,0,0,0,1,1,1,0,0]:[0,0,1,1,1,0,0,0,0,1,1,1,0,0]}}
+function newSource(i,amount,anchor){return {name:'Pay source '+(i+1),amount:amount||0,every:14,anchor:anchor||'2026-04-16',start:'2025-12-21',pat:[0,1,1,1,1,1,0]}}
 function defaults(){
   var E=function(t,a,f,d){return {id:uid(),title:t,amount:a,freq:f,due:d||''}};
   var T=todayDN(), anchor=dnISO(T-5), x;
@@ -195,9 +199,9 @@ function defaults(){
     expenses:ex, entries:[],
     plan:{months:3,startBal:0},
     sv:{start:1000,asOf:anchor,apr:4.5,comp:'Monthly',months:12,actual:{}},
-    debts:[{id:uid(),name:'Credit Card',type:'Credit Card',link:id('Credit Card Payment'),start:3000,apr:22.99,min:'',due:'',prio:'',actual:''},
-      {id:uid(),name:'Car Loan',type:'Auto Loan',link:id('Car Payment'),start:9000,apr:6.5,min:'',due:'',prio:'',actual:''},
-      {id:uid(),name:'Student Loan',type:'Student Loan',link:id('Student Loan'),start:15000,apr:5,min:'',due:'',prio:'',actual:''}],
+    debts:[{id:uid(),name:'Credit Card',type:'Credit Card',link:id('Credit Card Payment'),start:3000,apr:22.99,min:'',due:'',prio:'',asOf:dnISO(monthStart(T))},
+      {id:uid(),name:'Car Loan',type:'Auto Loan',link:id('Car Payment'),start:9000,apr:6.5,min:'',due:'',prio:'',asOf:dnISO(monthStart(T))},
+      {id:uid(),name:'Student Loan',type:'Student Loan',link:id('Student Loan'),start:15000,apr:5,min:'',due:'',prio:'',asOf:dnISO(monthStart(T))}],
     dcfg:{strategy:'Avalanche',mode:'fixed',fixed:100,pct:50,asOf:dnISO(monthStart(T))}
   };
 }
@@ -214,9 +218,11 @@ function normalize(o){
     o.sources=[s0,newSource(1,0,s0.anchor),newSource(2,0,s0.anchor),newSource(3,0,s0.anchor)];o.nSrc=1;
     o.sources.forEach(function(s,i){if(i){s.start=s0.start;s.every=s0.every;s.pat=s0.pat.slice()}});
   }
+  o.sources.forEach(function(s){if(s.pat.length>7)s.pat=s.pat.slice(0,7)});
   while(o.sources.length<MAXSRC)o.sources.push(newSource(o.sources.length,0,o.sources[0].anchor));
   if(!o.nSrc)o.nSrc=1;
   if(!o.debts)o.debts=[];
+  o.debts.forEach(function(d){if(!d.asOf)d.asOf=dnISO(monthStart(todayDN()))});
   if(!o.dcfg)o.dcfg=d.dcfg;
   o.dcfg=Object.assign({},d.dcfg,o.dcfg);
   o.v=2;delete o.pay;delete o.sched;
@@ -257,7 +263,7 @@ function compute(S){
   var nextPayAmt=nextD.length?nextD[0].amt:0;
   /* work days: a day counts when any active source works it */
   function work(dn){
-    for(var i=0;i<ACT.length;i++){var st=isoDN(ACT[i].start);if(isNaN(st))continue;if(ACT[i].pat[(((dn-st)%14)+14)%14])return 1}
+    for(var i=0;i<ACT.length;i++){if(ACT[i].pat[(((dn+4)%7)+7)%7])return 1}
     return 0;
   }
   var wdc={};
@@ -316,7 +322,7 @@ function compute(S){
   /* ---- debt payoff, month by month ---- */
   function simDebts(minOnly){
     if(!DB.length)return null;
-    var asOf=isoDN(cfg.asOf);asOf=isNaN(asOf)?monthStart(T):monthStart(asOf);
+    var stamps=DB.map(function(d){var x=isoDN(d.asOf);return isNaN(x)?monthStart(T):monthStart(x)}),asOf=Math.min.apply(null,stamps.concat([monthStart(T)]));
     var n=DB.length,rate=DB.map(function(d){return num(d.apr)/100/12}),mins=DB.map(minOf),dues=DB.map(dueOf);
     var strat=minOnly?'Minimums only':cfg.strategy,idx=DB.map(function(d,i){return i});
     idx.sort(function(a,b){
@@ -332,15 +338,16 @@ function compute(S){
     for(var t=1;t<=360;t++){
       if(prev.every(function(b){return b<=0.005}))break;
       var ms=addMonths(asOf,t-1),me=addMonths(ms,1)-1,ndays=dim(dnDate(ms).getUTCFullYear(),dnDate(ms).getUTCMonth());
-      var interest=0,bal=prev.map(function(b,i){if(b<=0)return 0;interest+=b*rate[i];return b*(1+rate[i])});
-      var mp=bal.map(function(b,i){return Math.min(mins[i],b)});
-      var lumpA=t===1?-1e9:ms,lump=DB.map(function(d,i){return bal[i]<=0?0:Math.min(lumpRaw(d.id,lumpA,me),Math.max(0,bal[i]-mp[i]))});
-      var rem=bal.map(function(b,i){return Math.max(0,b-mp[i]-lump[i])});
+      var A=stamps.map(function(x){return x<=ms}),sumMinA=0;mins.forEach(function(m,i){if(A[i])sumMinA+=m});
+      var interest=0,bal=prev.map(function(b,i){if(!A[i])return b;if(b<=0)return 0;interest+=b*rate[i];return b*(1+rate[i])});
+      var mp=bal.map(function(b,i){return A[i]?Math.min(mins[i],b):0});
+      var lumpA=ms,lump=DB.map(function(d,i){return !A[i]||bal[i]<=0?0:Math.min(lumpRaw(d.id,lumpA,me),Math.max(0,bal[i]-mp[i]))});
+      var rem=bal.map(function(b,i){return A[i]?Math.max(0,b-mp[i]-lump[i]):b});
       var sumMp=mp.reduce(function(s,x){return s+x},0);
-      var extra=minOnly?0:(cfg.mode==='pct'?num(cfg.pct)/100*Math.max(0,leftoverMonth(ms)-sumMin):num(cfg.fixed));
-      var pool=minOnly?0:Math.max(0,sumMin+extra-sumMp),alloc=DB.map(function(){return 0});
-      rk.forEach(function(i){var a=Math.max(0,Math.min(rem[i],pool));alloc[i]=a;pool-=a});
-      var close=rem.map(function(r,i){var c=r-alloc[i];return c<0.005?0:c});
+      var extra=minOnly?0:(cfg.mode==='pct'?num(cfg.pct)/100*Math.max(0,leftoverMonth(ms)-sumMinA):num(cfg.fixed));
+      var pool=minOnly?0:Math.max(0,sumMinA+extra-sumMp),alloc=DB.map(function(){return 0});
+      rk.forEach(function(i){if(!A[i])return;var a=Math.max(0,Math.min(rem[i],pool));alloc[i]=a;pool-=a});
+      var close=rem.map(function(r,i){var c=r-alloc[i];return c<0.005&&A[i]?0:c});
       var sumAlloc=alloc.reduce(function(s,x){return s+x},0),sumLump=lump.reduce(function(s,x){return s+x},0);
       months.push({ms:ms,close:close,paid:sumMp+sumLump+sumAlloc,int:interest,extra:sumAlloc,lump:sumLump,mins:sumMp});
       /* dated payments: minimums on the due day, lumps on their own date, extra on the month's last payday */
@@ -368,7 +375,11 @@ function compute(S){
   }
   function period(p){
     var b=pbase(p),d=debtOut(p.from,p.to);
-    b.debt=d.tot;b.debtList=d.list;b.out=b.outBase+d.tot;b.left=b.leftBase-d.tot;return b;
+    b.debt=d.tot;b.debtList=d.list;b.out=b.outBase+d.tot;b.left=b.leftBase-d.tot;
+    var dues=[];
+    for(var dn=p.from;dn<=p.to;dn++){var c=dayPlan(dn);for(var id in c){var ex=exPlan.filter(function(x){return x.id===id})[0];if(ex&&PLANNED[ex.freq])dues.push({dn:dn,title:ex.title,v:c[id]})}}
+    if(simP)simP.pays.forEach(function(x){if(x.dn>=p.from&&x.dn<=p.to)dues.push({dn:x.dn,title:x.name,v:x.amt})});
+    dues.sort(function(a,b2){return a.dn-b2.dn});b.dues=dues;return b;
   }
   function status(r){return r.to<T?'Past':r.from<=T?'Current':r.from===nextPay?'Next payday':'Upcoming'}
   /* ---- this pay period ---- */
@@ -410,7 +421,8 @@ function compute(S){
       payoffDN:simP.allPaid?simP.months[simP.months.length-1].ms:null,
       months:simP.allPaid?simP.months.length-1:null,
       baseMonths:simM.allPaid?simM.months.length-1:null,
-      intSaved:simM.totInt-simP.totInt,
+      intRemain:simP.months.slice(mi+1).reduce(function(s,m){return s+m.int},0),
+      intSaved:simM.months.slice(mi+1).reduce(function(s,m){return s+m.int},0)-simP.months.slice(mi+1).reduce(function(s,m){return s+m.int},0),
       leftNow:leftoverMonth(ms0),
       extraNow:(function(){var m=simP.months[Math.min(mi+1,simP.months.length-1)];return mi+1<simP.months.length?m.extra:0})(),
       DB:DB};
@@ -425,6 +437,14 @@ function compute(S){
 }
 
 /* ---------- UI state ---------- */
+function lsGet(k){try{return localStorage.getItem(KEY+k)}catch(e){return null}}
+function lsSet(k,v){try{localStorage.setItem(KEY+k,String(v))}catch(e){}}
+function ago(t){var d=Math.floor((Date.now()-t)/864e5);return d<=0?'today':d===1?'yesterday':d+' days ago'}
+function backupDue(){
+  if(S.demo)return false;var now=Date.now(),last=+lsGet('-bk')||0,first=+lsGet('-first')||0,snz=+lsGet('-snooze')||0;
+  if(now<snz)return false;
+  return last?(now-last)/864e5>=30:(first&&(now-first)/864e5>=14);
+}
 var tab='budget', M=null;
 var TABS=[['budget','Budget'],['paychecks','Paychecks'],['savings','Savings'],['debt','Debt'],['settings','Settings']];
 try{var t0=localStorage.getItem(KEY+'-tab');if(t0&&TABS.some(function(x){return x[0]===t0}))tab=t0}catch(e){}
@@ -449,12 +469,13 @@ function debtName(id){var d=S.debts.filter(function(x){return x.id===id})[0];ret
 function viewBudget(){
   var inc=M.inc,list=S.expenses.slice().sort(function(a,b){return sortKey(a)-sortKey(b)});
   var daysAway=M.nextPay-M.T;
-  var h=S.demo?'<section class="card form"><div><b>Example numbers</b></div><p class="muted" style="margin:0;font-size:13.5px">Everything here is sample data so you can look around: a $2,400 paycheck, typical bills and three debts. Start fresh to enter your own, or keep exploring and edit the examples.</p><div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn primary" data-demo-clear>Start with my own numbers</button><button type="button" class="btn" data-demo-keep>Keep examples</button></div></section>':'';
+  var h=backupDue()?'<section class="card form"><div><b>Time for a backup</b></div><p class="muted" style="margin:0;font-size:13.5px">Your numbers live only on this device. Copy a backup so you can restore them if this browser is cleared.</p><div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn primary" data-backup>Copy backup now</button><button type="button" class="btn" data-snooze>Remind me later</button></div></section>':'';
+  h+=S.demo?'<section class="card form"><div><b>Example numbers</b></div><p class="muted" style="margin:0;font-size:13.5px">Everything here is sample data so you can look around: a $2,400 paycheck, typical bills and three debts. Start fresh to enter your own, or keep exploring and edit the examples.</p><div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn primary" data-demo-clear>Start with my own numbers</button><button type="button" class="btn" data-demo-keep>Keep examples</button></div></section>':'';
   h+='<section class="card hero"><div class="kicker">Next payday</div><div class="big">'+fdl(M.nextPay)+'</div>'+
-    '<div class="sub">'+(daysAway===1?'Tomorrow':'In '+daysAway+' days')+' · '+m0(M.nextPayAmt)+' · last paid '+fd(M.lastPay)+'</div></section>';
+    '<div class="sub">'+(daysAway===1?'Tomorrow':'In '+daysAway+' days')+' · '+m0(M.nextPayAmt)+' · last payday '+fd(M.lastPay)+'</div></section>';
   h+='<section><h2>This pay period</h2><div class="metrics">'+
     '<div class="card metric"><div class="l">Set aside before payday</div><div class="v">'+m0(M.setAside)+'</div></div>'+
-    '<div class="card metric"><div class="l">Work days until payday</div><div class="v">'+M.wdUntil+'</div></div>'+
+    '<div class="card metric"><div class="l">Days until payday</div><div class="v">'+(M.nextPay-M.T)+'</div></div>'+
     '<div class="card metric"><div class="l">Income this month</div><div class="v">'+m0(inc)+'</div></div>'+
     '<div class="card metric"><div class="l">Leftover this month</div><div class="v '+(M.leftMonth<0?'neg':'pos')+'">'+m0(M.leftMonth)+'</div></div>'+
     '<div class="card metric span2"><div class="l">Total monthly expenses</div><div class="v">'+m0(M.totalMonthly)+'</div></div></div>'+
@@ -469,22 +490,21 @@ function viewBudget(){
   h+='</div><div style="margin-top:10px"><button type="button" class="btn add" data-add-expense>+ Expense</button></div></section>';
   return h;
 }
+function nextDue(r){
+  if(r.status==='Past')return '';
+  var nx=r.dues.filter(function(x){return x.dn>=M.T})[0];
+  return '<span class="muted" style="grid-column:1/-1;font-size:12.5px;margin-top:2px">'+(nx?'Next due: <b>'+esc(nx.title)+'</b> · '+fd(nx.dn)+' · '+m2(nx.v):'No more bills due this period')+'</span>';
+}
 function viewPaychecks(){
-  var pl=M.plan,h='<section><h2>Next 3 paydays</h2><div class="paydays">';
-  var nd=M.payDates(M.nextPay,M.nextPay+200).slice(0,3);
-  nd.forEach(function(x){var dA=x.dn-M.T;
-    h+='<div class="card payday"><div class="d">'+fd(x.dn)+'</div><div class="n">'+(dA===1?'tomorrow':'in '+dA+' days')+'</div><div class="m">'+m0(x.amt)+'</div></div>'});
-  h+='</div></section>';
-  h+='<section><div class="card form"><div class="grid2"><div class="field"><label for="pm">Months to project</label><select id="pm" data-plan="months">'+
-    [1,2,3,4,5,6].map(function(n){return '<option'+(n===S.plan.months?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div>'+
-    '<div class="field"><label for="psb">Starting balance</label><input id="psb" type="number" inputmode="decimal" step="0.01" data-plan="startBal" value="'+esc(S.plan.startBal)+'"></div></div></div></section>';
+  var pl=M.plan,h='<section><div class="card form"><div class="field"><label for="pm">Months to project</label><select id="pm" data-plan="months">'+
+    [1,2,3,4,5,6].map(function(n){return '<option'+(n===S.plan.months?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div></div></section>';
   h+='<section><h2>Paycheck projection</h2><div class="pcs">';
   pl.forEach(function(r,i){
     var spent=(r.pay+r.bonus)>0?Math.min(100,r.out/(r.pay+r.bonus)*100):0;
     var tag=r.status==='Next payday'?'<span class="pill warn">Next payday</span>':r.status==='Current'?'<span class="pill pos">Current</span>':r.status==='Past'?'<span class="pill">Past</span>':'';
-    h+='<details class="card pc"'+(i<3?' open':'')+'><summary><span class="range">'+fd(r.from)+' – '+fd(r.to)+' '+tag+'</span><span class="left" style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m0(r.left)+'</span>'+
+    h+='<details class="card pc"'+(i<2?' open':'')+'><summary><span class="range">'+fd(r.from)+' – '+fd(r.to)+' '+tag+'</span><span class="left" style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m0(r.left)+'</span>'+
       '<span class="muted" style="font-size:12.5px">'+spent.toFixed(0)+'% of pay spent</span><span class="muted" style="font-size:12.5px;text-align:right">left over</span>'+
-      '<span class="bar"><i class="'+(r.out>r.pay+r.bonus?'over':'')+'" style="width:'+spent+'%"></i></span></summary><div class="det">'+
+      nextDue(r)+'<span class="bar"><i class="'+(r.out>r.pay+r.bonus?'over':'')+'" style="width:'+spent+'%"></i></span></summary><div class="det">'+
       '<div class="li"><span>Pay</span><span>'+m2(r.pay)+'</span></div>'+
       (r.bonus?'<div class="li"><span>Bonus / extra pay</span><span style="color:var(--pos)">+'+m2(r.bonus)+'</span></div>':'')+
       '<div class="li"><span>Planned bills</span><span>'+m2(r.planned)+'</span></div>'+
@@ -492,8 +512,7 @@ function viewPaychecks(){
       '<div class="li"><span>Unplanned / one-time</span><span>'+m2(r.unplanned)+'</span></div>'+
       (r.debt>0.004?'<div class="li"><span>Debt payments</span><span>'+m2(r.debt)+'</span></div>'+r.debtList.map(function(x){return '<div class="li sub"><span>'+esc(x.title)+'</span><span>'+m2(x.v)+'</span></div>'}).join(''):'')+
       '<div class="li strong"><span>Total out</span><span>'+m2(r.out)+'</span></div>'+
-      '<div class="li strong"><span>Left over</span><span style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m2(r.left)+'</span></div>'+
-      '<div class="li"><span>Running balance</span><span>'+m2(r.bal)+'</span></div></div></details>';
+      '<div class="li strong"><span>Left over</span><span style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m2(r.left)+'</span></div></div></details>';
   });
   h+='</div></section>';
   var en=S.entries.slice().sort(function(a,b){return isoDN(a.date)-isoDN(b.date)});
@@ -507,7 +526,8 @@ function viewPaychecks(){
   return h;
 }
 /* line chart: series = [{pts:[[x,y],...], dash:bool}] */
-function lineChart(series,label,todayX){
+var CH={};
+function lineChart(series,label,todayX,cid,mark){
   var allx=[],ally=[];series.forEach(function(s){s.pts.forEach(function(p){allx.push(p[0]);ally.push(p[1])})});
   if(allx.length<2)return '';
   var W=640,H=230,L=58,R=14,Tp=14,B=28,x0=Math.min.apply(null,allx),x1=Math.max.apply(null,allx);
@@ -525,7 +545,11 @@ function lineChart(series,label,todayX){
     body+='<path d="'+line+'" fill="none" stroke="'+(s.dash?'var(--muted)':'var(--accent)')+'" stroke-width="'+(s.dash?2:2.5)+'"'+(s.dash?' stroke-dasharray="6 5"':'')+' stroke-linejoin="round"/>';
     if(!s.dash){var l=s.pts[s.pts.length-1];body+='<circle cx="'+X(l[0])+'" cy="'+Y(l[1])+'" r="4.5" fill="var(--accent)"/>'}
   });
-  return '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(label)+'">'+g+tx+body+xl+'</svg>';
+  if(mark){var ml=series[0].pts[series[0].pts.length-1];body+='<circle cx="'+X(ml[0])+'" cy="'+Y(ml[1])+'" r="6" fill="var(--pos)" stroke="var(--surface)" stroke-width="2"/><text x="'+(X(ml[0])-8)+'" y="'+(Y(ml[1])-12)+'" text-anchor="end" font-size="12" font-weight="700" fill="var(--pos)" font-family="var(--font)">'+esc(mark)+'</text>'}
+  if(cid)CH[cid]={series:series,x0:x0,x1:x1,W:W,L:L,R:R,X:X,Y:Y,Tp:Tp,H:H,B:B};
+  return '<div class="readout" id="ro-'+cid+'" aria-live="polite"><span class="muted">Slide your finger along the line</span></div>'+
+    '<svg data-ch="'+cid+'" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(label)+'. Touch and slide to read values.">'+g+tx+body+xl+
+    '<g class="scrub" display="none"><line y1="'+Tp+'" y2="'+(H-B)+'" stroke="var(--ink)" stroke-width="1.5"/><circle r="5.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/><circle class="c2" r="4.5" fill="var(--muted)" stroke="var(--surface)" stroke-width="2"/></g></svg>';
 }
 function viewSavings(){
   var v=S.sv,h='<section><h2>Savings inputs</h2><div class="card form"><div class="grid2">'+
@@ -542,7 +566,7 @@ function viewSavings(){
     '<div class="card metric"><div class="l">In '+v.months+' months</div><div class="v pos">'+m0(M.balN)+'</div></div>'+
     '<div class="card metric"><div class="l">Saved over '+v.months+' months</div><div class="v">'+m0(M.savedN)+'</div></div>'+
     '<div class="card metric"><div class="l">Interest over '+v.months+' months</div><div class="v">'+m0(M.intN)+'</div></div></div></section>';
-  h+='<section><h2>Balance by paycheck</h2><div class="card chart">'+lineChart([{pts:M.sv.map(function(r){return [r.from,r.close]})}],'Projected savings balance by paycheck',M.T)+'</div></section>';
+  h+='<section><h2>Balance by paycheck</h2><div class="card chart">'+lineChart([{pts:M.sv.map(function(r){return [r.from,r.close]})}],'Projected savings balance by paycheck',M.T,'sv')+'</div></section>';
   h+='<section><h2>Ledger</h2><p class="muted" style="margin:-4px 0 10px;font-size:13.5px">Left over comes from Budget, Paycheck Plan and Debt payments. For a paycheck already behind you, type what you actually saved to replace the plan figure.</p><div class="card tablewrap"><table><thead><tr><th>Pay date</th><th>Status</th><th>Debt paid</th><th>Left over</th><th>Actual saved</th><th>Interest</th><th>Balance</th></tr></thead><tbody>';
   h+=M.sv.map(function(r){
     var c=r.status==='Current'||r.status==='Next payday'?'cur':r.status==='Past'?'past':'';
@@ -559,35 +583,34 @@ function viewDebt(){
     '<div class="field"><span class="lab">Strategy</span><div class="seg two" role="group" aria-label="Strategy">'+STRATS.map(function(s){return '<button type="button" data-strat="'+s+'" aria-pressed="'+(c.strategy===s)+'">'+s+'</button>'}).join('')+'</div><span class="hint">'+STRAT_HINT[c.strategy]+'</span></div>'+
     (c.strategy==='Minimums only'?'':'<div class="field"><span class="lab">Extra payment each month</span><div class="seg" role="group" aria-label="Extra payment source"><button type="button" data-mode="fixed" aria-pressed="'+(c.mode==='fixed')+'">Fixed $</button><button type="button" data-mode="pct" aria-pressed="'+(c.mode==='pct')+'">% of leftover</button></div></div>'+
       (c.mode==='fixed'?'<div class="field"><label for="dx">Fixed extra per month</label><input id="dx" type="number" inputmode="decimal" min="0" step="0.01" data-dcfg="fixed" value="'+esc(c.fixed)+'"></div>'
-        :'<div class="field"><label for="dp">Share of monthly leftover</label><input id="dp" type="number" inputmode="decimal" min="0" max="100" step="1" data-dcfg="pct" value="'+esc(c.pct)+'"><span class="hint">Percent of what is left after bills and minimum payments, month by month.</span></div>'))+
-    '<div class="field"><label for="dd">Balances as of</label><input id="dd" type="date" data-dcfg="asOf" value="'+esc(c.asOf)+'"><span class="hint">Use the 1st of the month your starting balances are from. Balances count down from there.</span></div></div></section>';
+        :'<div class="field"><label for="dp">Share of monthly leftover</label><input id="dp" type="number" inputmode="decimal" min="0" max="100" step="1" data-dcfg="pct" value="'+esc(c.pct)+'"><span class="hint">Percent of what is left after bills and minimum payments, month by month.</span></div>'))+'</div></section>';
   if(!D){
     return h+'<section><div class="card empty">No debts yet. Add each loan or card with its balance, rate and minimum.'+(S.expenses.some(function(e){return e.freq==='Monthly'})?' Link a debt to a Monthly expense on Budget (such as a loan payment) and it takes that expense\'s amount and due day.':'')+'</div><div style="margin-top:10px"><button type="button" class="btn add" data-add-debt>+ Debt</button></div></section>';
   }
   var sim=D.sim,base=D.base,ls=D.leftNow-sim.sumMin;
   h+='<section><h2>Summary</h2><div class="metrics">'+
-    '<div class="card metric"><div class="l">Owed this month</div><div class="v">'+m0(D.curTotal)+'</div></div>'+
+    '<div class="card metric"><div class="l">Current total debt</div><div class="v">'+m0(D.curTotal)+'</div></div>'+
     '<div class="card metric"><div class="l">Debt-free</div><div class="v sm">'+(D.payoffDN!=null?fmy(D.payoffDN):'Not within 30 years')+'</div></div>'+
     '<div class="card metric"><div class="l">Months to go</div><div class="v">'+(D.months!=null?Math.max(0,D.months-D.mi):'–')+'</div></div>'+
-    '<div class="card metric"><div class="l">Total interest</div><div class="v">'+m0(sim.totInt)+'</div></div>'+
+    '<div class="card metric"><div class="l">Interest to go</div><div class="v">'+m0(D.intRemain)+'</div></div>'+
     '<div class="card metric"><div class="l">Interest saved vs minimums</div><div class="v pos">'+m0(Math.max(0,D.intSaved))+'</div></div>'+
     '<div class="card metric"><div class="l">Months saved vs minimums</div><div class="v pos">'+(D.months!=null&&D.baseMonths!=null?Math.max(0,D.baseMonths-D.months):'–')+'</div></div></div>'+
     '<div class="note" style="margin-top:10px"><b>Cash available for extra payment: '+m0(Math.max(0,ls))+'</b> this month. That is pay from pay periods dated this month, minus their bills and the minimum payments. It differs from Budget\'s "Leftover this month", which is income minus all monthly expenses over the calendar month.</div></section>';
   h+='<section><h2>Your debts</h2><div class="card list">'+D.DB.map(function(d,i){
-    var cur=D.cur[i],po=sim.payoff[i],lk=M.linkOf(d),ahead=d.actual!==''&&d.actual!=null&&!isNaN(parseFloat(d.actual))&&Math.abs(parseFloat(d.actual)-cur)>1;
+    var cur=D.cur[i],po=sim.payoff[i],lk=M.linkOf(d);
     var order=sim.rk.indexOf(i)+1;
     return '<button type="button" class="row" data-edit-debt="'+d.id+'"><span class="t">'+esc(d.name||'Debt')+'</span><span class="a">'+m2(cur)+'</span>'+
       '<span class="s"><span class="pill">'+esc(d.type||'Other')+'</span>'+(lk?'<span class="pill pos">From Budget: '+esc(lk.title)+'</span>':'')+num(d.apr).toFixed(2)+'% · min '+m0(sim.mins[i])+' on the '+ord(sim.dues[i])+'</span>'+
       '<span class="b wrapb">'+(po!=null?'paid off '+fmy(sim.months[po].ms):'not paid off')+(c.strategy==='Minimums only'?'':' · #'+order)+'</span>'+
-      (ahead?'<span class="u">Your actual balance is '+m2(parseFloat(d.actual))+', plan says '+m2(cur)+'. Set the starting balance and date from your statement to re-anchor.</span>':'')+'</button>';
+      '</button>';
   }).join('')+'</div><div style="margin-top:10px"><button type="button" class="btn add" data-add-debt>+ Debt</button></div></section>';
-  var pts=sim.months.map(function(m){return [m.ms,m.close.reduce(function(s,x){return s+x},0)]});
-  var bpts=base.months.map(function(m){return [m.ms,m.close.reduce(function(s,x){return s+x},0)]});
-  h+='<section><h2>Total debt over time</h2><div class="card chart">'+lineChart(c.strategy==='Minimums only'?[{pts:pts}]:[{pts:pts},{pts:bpts,dash:true}],'Total debt balance by month',M.T)+
+  var pts=sim.months.slice(D.mi).map(function(m){return [m.ms,m.close.reduce(function(s,x){return s+x},0)]});
+  var bpts=base.months.slice(D.mi).map(function(m){return [m.ms,m.close.reduce(function(s,x){return s+x},0)]});
+  h+='<section><h2>Total debt over time</h2><div class="card chart">'+lineChart(c.strategy==='Minimums only'?[{pts:pts}]:[{pts:pts},{pts:bpts,dash:true}],'Total debt balance by month',M.T,'debt',D.payoffDN!=null?'Debt-free '+fmy(D.payoffDN):'')+
     '<div class="legend"><span><i></i>'+(c.strategy==='Minimums only'?'Minimums only':'Your plan')+'</span>'+(c.strategy==='Minimums only'?'':'<span><i class="dash"></i>Minimums only</span>')+'</div></div></section>';
   h+='<section><h2>Month by month</h2><p class="muted" style="margin:-4px 0 10px;font-size:13.5px">Interest is added first, then payments. Extra payments go to the debt first in your payoff order.</p><div class="card tablewrap"><table><thead><tr><th>Month</th><th>Paid</th><th>Extra</th><th>Interest</th>'+D.DB.map(function(d){return '<th>'+esc((d.name||'Debt').slice(0,10))+'</th>'}).join('')+'<th>Total</th></tr></thead><tbody>';
-  h+=sim.months.slice(1,61).map(function(m,t){
-    var cls=monthsBetween(sim.asOf,M.T-0)===t?'cur':(m.ms<monthStart(M.T)?'past':'');
+  h+=sim.months.slice(D.mi+1,D.mi+61).map(function(m,t){
+    var cls=t===0?'cur':'';
     return '<tr class="'+cls+'"><td>'+fmy(m.ms)+'</td><td>'+m2(m.paid)+'</td><td>'+m2(m.extra)+'</td><td>'+m2(m.int)+'</td>'+m.close.map(function(b){return '<td>'+m2(b)+'</td>'}).join('')+'<td><b>'+m2(m.close.reduce(function(s,x){return s+x},0))+'</b></td></tr>';
   }).join('');
   return h+'</tbody></table></div></section>';
@@ -601,24 +624,41 @@ function viewSettings(){
     h+='<section><h2>'+esc(s.name||('Pay source '+(si+1)))+'</h2><div class="card form"><div class="field"><label for="sn'+si+'">Name</label><input id="sn'+si+'" data-src="'+si+':name" value="'+esc(s.name)+'" autocomplete="off"></div><div class="grid2">'+
       '<div class="field"><label for="sa'+si+'">Pay amount (per paycheck)</label><input id="sa'+si+'" type="number" inputmode="decimal" step="0.01" data-src="'+si+':amount" value="'+esc(s.amount)+'"></div>'+
       '<div class="field"><label for="se'+si+'">Days between paychecks</label><input id="se'+si+'" type="number" inputmode="numeric" min="1" step="1" data-src="'+si+':every" value="'+esc(s.every)+'"><span class="hint">14 = every two weeks, 7 = weekly</span></div></div>'+
-      '<div class="field"><label for="sd'+si+'">A past payday</label><input id="sd'+si+'" type="date" data-src="'+si+':anchor" value="'+esc(s.anchor)+'"><span class="hint">Any date you were paid. Every payday is counted forward from it.</span></div>'+
-      '<div class="field"><span class="lab">Work schedule</span><span class="hint">Tap the days you work. Two weeks repeat. Work-day expenses count a day when any source works it.</span></div>';
-    [0,1].forEach(function(w){
-      h+='<div><div style="font-weight:700;margin-bottom:6px;font-size:13px">Week '+(w+1)+'</div><div class="sched">'+DN.map(function(n){return '<div class="dn">'+n+'</div>'}).join('')+
-        DN.map(function(n,i){var k=w*7+i;return '<button type="button" data-day="'+si+':'+k+'" aria-pressed="'+(s.pat[k]?'true':'false')+'" aria-label="'+n+' week '+(w+1)+'">'+(s.pat[k]?'Work':'Off')+'</button>'}).join('')+'</div></div>'});
-    h+='<div class="field"><label for="ss'+si+'">First Sunday of week 1</label><input id="ss'+si+'" type="date" data-src="'+si+':start" value="'+esc(s.start)+'"><span class="hint">Anchors the two-week pattern to the calendar.</span></div></div></section>';
+      '<div class="field"><label for="sd'+si+'">Last payday</label><input id="sd'+si+'" type="date" data-src="'+si+':anchor" value="'+esc(s.anchor)+'"><span class="hint">The date you were last paid. Future paydays are counted from it.</span></div>'+
+      '<div class="field"><span class="lab">Work days</span><span class="hint">Tap the days you work each week. Work-day expenses such as gas count only these days.</span></div>';
+    h+='<div class="sched">'+DN.map(function(n){return '<div class="dn">'+n+'</div>'}).join('')+
+      DN.map(function(n,i){return '<button type="button" data-day="'+si+':'+i+'" aria-pressed="'+(s.pat[i]?'true':'false')+'" aria-label="'+n+'">'+(s.pat[i]?'Work':'Off')+'</button>'}).join('')+'</div></div></section>';
   }
   h+='<section><h2>Back up your data</h2><div class="card form"><p class="muted" style="margin:0;font-size:13.5px">Everything is stored only in this browser on this device. Clearing Safari data erases it, so copy a backup now and then.'+(storeOK?'':' <b style="color:var(--neg)">Saving is blocked in this view, so changes will be lost when you leave.</b>')+'</p>'+
-    '<div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn" data-backup>Copy backup</button><button type="button" class="btn" data-restore-open>Restore from backup</button></div>'+
+    '<p class="muted" style="margin:0;font-size:13.5px">Last backup: <b>'+(+lsGet('-bk')?ago(+lsGet('-bk')):'never')+'</b></p><div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn" data-backup>Copy backup</button><button type="button" class="btn" data-restore-open>Restore from backup</button></div>'+
     '<div id="restorebox" hidden><label class="lab" for="rt" style="font-size:12.5px;font-weight:700;color:var(--muted)">Paste your backup here</label><textarea id="rt" spellcheck="false"></textarea><div style="margin-top:8px"><button type="button" class="btn primary" data-restore>Restore</button></div></div>'+
     '<hr style="border:0;border-top:1px solid var(--line);width:100%"><div><button type="button" class="btn danger" data-reset>Reset to example data</button></div></div></section>';
   return h;
+}
+function bindCharts(){
+  [].forEach.call(document.querySelectorAll('svg[data-ch]'),function(svg){
+    var id=svg.getAttribute('data-ch'),c=CH[id];if(!c)return;
+    var g=svg.querySelector('.scrub'),ln=g.querySelector('line'),c1=g.querySelector('circle'),c2=g.querySelector('.c2'),ro=document.getElementById('ro-'+id);
+    function nearest(pts,xv){var b=0,bd=1e18;pts.forEach(function(p,i){var d=Math.abs(p[0]-xv);if(d<bd){bd=d;b=i}});return pts[b]}
+    function at(ev){
+      var r=svg.getBoundingClientRect(),vx=(ev.clientX-r.left)/r.width*c.W;
+      var xv=c.x0+(vx-c.L)/(c.W-c.L-c.R)*(c.x1-c.x0),p=nearest(c.series[0].pts,xv),px=c.X(p[0]);
+      g.removeAttribute('display');ln.setAttribute('x1',px);ln.setAttribute('x2',px);c1.setAttribute('cx',px);c1.setAttribute('cy',c.Y(p[1]));
+      var html='<span class="when">'+fd(p[0],id==='debt'?{month:'short',year:'numeric'}:{month:'short',day:'numeric',year:'numeric'})+'</span><span><b>'+m0(p[1])+'</b></span>';
+      if(c.series[1]){var q=nearest(c.series[1].pts,p[0]);c2.setAttribute('cx',c.X(q[0]));c2.setAttribute('cy',c.Y(q[1]));c2.style.display='';html+='<span class="muted">Minimums only '+m0(q[1])+'</span>'}else c2.style.display='none';
+      ro.innerHTML=html;
+    }
+    svg.addEventListener('pointerdown',function(e){try{svg.setPointerCapture(e.pointerId)}catch(x){}at(e)});
+    svg.addEventListener('pointermove',function(e){if(e.pointerType==='mouse'||e.buttons||svg.hasPointerCapture&&svg.hasPointerCapture(e.pointerId))at(e)});
+    svg.addEventListener('pointerleave',function(e){if(e.pointerType==='mouse'){g.setAttribute('display','none');ro.innerHTML='<span class="muted">Slide your finger along the line</span>'}});
+  });
 }
 function render(){
   M=compute(S);
   $('today').textContent=fd(M.T,{weekday:'short',month:'short',day:'numeric'});
   renderTabs();
   $('view').innerHTML=tab==='budget'?viewBudget():tab==='paychecks'?viewPaychecks():tab==='savings'?viewSavings():tab==='debt'?viewDebt():viewSettings();
+  bindCharts();
 }
 function commit(){save();var y=window.scrollY,open=[].map.call(document.querySelectorAll('details.pc'),function(d){return d.open});render();[].forEach.call(document.querySelectorAll('details.pc'),function(d,i){if(open[i]!=null)d.open=open[i]});window.scrollTo(0,y)}
 
@@ -654,18 +694,17 @@ function entrySheet(id){
 }
 function debtSheet(id){
   var d=S.debts.filter(function(x){return x.id===id})[0],isNew=!d;
-  if(isNew)d={id:uid(),name:'',type:'Credit Card',link:'',start:'',apr:'',min:'',due:'',prio:'',actual:''};
+  if(isNew)d={id:uid(),name:'',type:'Credit Card',link:'',start:'',apr:'',min:'',due:'',prio:''};
   var monthly=S.expenses.filter(function(e){return e.freq==='Monthly'});
   openSheet('<h3>'+(isNew?'New debt':'Edit debt')+'</h3><form id="df" class="form" style="padding:0" data-id="'+d.id+'" data-new="'+(isNew?1:0)+'">'+
     '<div class="grid2"><div class="field"><label for="dn">Debt name</label><input id="dn" required value="'+esc(d.name)+'" autocomplete="off"></div>'+
     '<div class="field"><label for="dt">Type</label><select id="dt">'+DTYPES.map(function(t){return '<option'+(t===d.type?' selected':'')+'>'+t+'</option>'}).join('')+'</select></div></div>'+
     '<div class="field"><label for="dl">Link to Budget expense (optional)</label><select id="dl"><option value="">None</option>'+monthly.map(function(e){return '<option value="'+e.id+'"'+(e.id===d.link?' selected':'')+'>'+esc(e.title)+'</option>'}).join('')+'</select><span class="hint" id="dlh"></span></div>'+
-    '<div class="grid2"><div class="field"><label for="db">Starting balance</label><input id="db" type="number" inputmode="decimal" step="0.01" min="0" required value="'+esc(d.start)+'"></div>'+
+    '<div class="grid2"><div class="field"><label for="db">Current balance</label><input id="db" type="number" inputmode="decimal" step="0.01" min="0" required value="'+esc(d.start)+'"><span class="hint">From a recent statement. It counts down on its own as payments are made. Change it any time to match your statement.</span></div>'+
     '<div class="field"><label for="dr">APR %</label><input id="dr" type="number" inputmode="decimal" step="0.01" min="0" value="'+esc(d.apr)+'"></div></div>'+
     '<div class="grid2"><div class="field"><label for="dm">Minimum payment</label><input id="dm" type="number" inputmode="decimal" step="0.01" min="0" value="'+esc(d.min)+'"></div>'+
     '<div class="field"><label for="du">Due day (1-31)</label><input id="du" type="number" inputmode="numeric" step="1" min="1" max="31" value="'+esc(d.due)+'"></div></div>'+
-    '<div class="grid2"><div class="field"><label for="dp2">Priority (Custom strategy)</label><input id="dp2" type="number" inputmode="numeric" step="1" min="1" max="20" value="'+esc(d.prio)+'"><span class="hint">1 is paid first.</span></div>'+
-    '<div class="field"><label for="da">Actual balance today (optional)</label><input id="da" type="number" inputmode="decimal" step="0.01" min="0" value="'+esc(d.actual)+'"><span class="hint">From your statement. Flags a difference from the plan.</span></div></div>'+
+    '<div class="field"><label for="dp2">Priority (Custom strategy)</label><input id="dp2" type="number" inputmode="numeric" step="1" min="1" max="20" value="'+esc(d.prio)+'"><span class="hint">1 is paid first.</span></div>'+
     '<div class="acts">'+(isNew?'':'<button type="button" class="btn danger" id="ddel">Delete</button>')+'<div class="r"><button type="button" class="btn" data-close>Cancel</button><button type="submit" class="btn primary">Save</button></div></div></form>',isNew?'dn':null);
   syncDebt();
 }
@@ -674,6 +713,24 @@ function syncDebt(){
   $('dm').disabled=on;$('du').disabled=on;
   if(on){$('dm').value=num(e.amount);$('du').value=Math.round(num(e.due,1))||1}
   $('dlh').textContent=on?'Minimum and due day come from Budget. Choose None to type your own.':'';
+}
+var WN=[];
+function wizard(step){
+  var DNm=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  if(step===1)openSheet('<h3>Step 1 of 3 · Your pay</h3><form id="w1" class="form" style="padding:0"><div class="field"><label for="w1a">Pay per paycheck</label><input id="w1a" type="number" inputmode="decimal" step="0.01" min="0" required></div>'+
+    '<div class="grid2"><div class="field"><label for="w1e">Days between paychecks</label><input id="w1e" type="number" inputmode="numeric" min="1" step="1" value="14" required><span class="hint">14 = every two weeks</span></div>'+
+    '<div class="field"><label for="w1d">Last payday</label><input id="w1d" type="date" required></div></div><p class="muted" style="margin:0;font-size:13px">Extra pay sources can be added later in Settings.</p>'+
+    '<div class="acts"><div class="r"><button type="submit" class="btn primary">Next</button></div></div></form>','w1a');
+  else if(step===2){var pat=S.sources[0].pat;
+    openSheet('<h3>Step 2 of 3 · Your work days</h3><p class="muted" style="margin:0;font-size:14px">Tap the days you work. Expenses set to Work Days, such as gas, are spread over these days.</p><div class="sched">'+DNm.map(function(n){return '<div class="dn">'+n+'</div>'}).join('')+
+      DNm.map(function(n,i){return '<button type="button" data-wday="'+i+'" aria-pressed="'+(pat[i]?'true':'false')+'" aria-label="'+n+'">'+(pat[i]?'Work':'Off')+'</button>'}).join('')+'</div>'+
+      '<div class="acts"><div class="r"><button type="button" class="btn primary" data-wnext="3">Next</button></div></div>');}
+  else openSheet('<h3>Step 3 of 3 · Your bills</h3><p class="muted" style="margin:0;font-size:14px">Add each bill or regular spending. '+(WN.length?'<b>Added: '+esc(WN.join(', '))+'</b>':'You can add more any time on the Budget tab.')+'</p>'+
+    '<form id="w3" class="form" style="padding:0"><div class="field"><label for="w3t">Title</label><input id="w3t" required autocomplete="off" placeholder="Rent, Groceries, Phone"></div>'+
+    '<div class="grid2"><div class="field"><label for="w3a">Monthly amount</label><input id="w3a" type="number" inputmode="decimal" step="0.01" min="0" required></div>'+
+    '<div class="field"><label for="w3f">Frequency</label><select id="w3f">'+FREQS.map(function(f){return '<option'+(f==='Monthly'?' selected':'')+'>'+f+'</option>'}).join('')+'</select></div></div>'+
+    '<div class="field" id="w3dw"><label for="w3d">Due day of month</label><input id="w3d" type="number" inputmode="numeric" min="1" max="31" step="1"></div>'+
+    '<div class="acts"><button type="button" class="btn" data-wdone>Done</button><div class="r"><button type="submit" class="btn primary">Add bill</button></div></div></form>','w3t');
 }
 function armDelete(btn,fn){
   if(btn.dataset.armed){fn();return}
@@ -684,9 +741,13 @@ function armDelete(btn,fn){
 document.addEventListener('click',function(ev){
   var t=ev.target.closest('button,[data-tab]');if(!t)return;
   if(t.dataset.tab){tab=t.dataset.tab;try{localStorage.setItem(KEY+'-tab',tab)}catch(e){}render();window.scrollTo(0,0);return}
+  if(t.dataset.wday!=null){var pw=S.sources[0].pat,wk=+t.dataset.wday;pw[wk]=pw[wk]?0:1;wizard(2);return}
+  if(t.dataset.wnext){wizard(3);return}
+  if(t.hasAttribute('data-wdone')){closeSheet();WN=[];tab='budget';commit();toast('All set. Add debts on the Debt tab');return}
   if(t.hasAttribute('data-close')){closeSheet();return}
-  if(t.hasAttribute('data-demo-clear')){S=blank();commit();tab='settings';render();window.scrollTo(0,0);toast('Cleared. Enter your pay first');return}
+  if(t.hasAttribute('data-demo-clear')){S=blank();save();render();wizard(1);return}
   if(t.hasAttribute('data-demo-keep')){S.demo=false;commit();toast('Examples kept');return}
+  if(t.hasAttribute('data-snooze')){lsSet('-snooze',Date.now()+14*864e5);render();return}
   if(t.hasAttribute('data-add-expense')){expenseSheet();return}
   if(t.dataset.edit){expenseSheet(t.dataset.edit);return}
   if(t.hasAttribute('data-add-entry')){entrySheet();return}
@@ -702,7 +763,7 @@ document.addEventListener('click',function(ev){
   if(t.closest('#nf')&&t.dataset.type){var f=$('nf');f.dataset.type=t.dataset.type;$('ndebtw').hidden=t.dataset.type==='bonus';[].forEach.call(f.querySelectorAll('.seg button'),function(b){b.setAttribute('aria-pressed',b===t?'true':'false')});return}
   if(t.dataset.day!=null){var p=t.dataset.day.split(':'),k=+p[1],pat=S.sources[+p[0]].pat;pat[k]=pat[k]?0:1;commit();return}
   if(t.hasAttribute('data-backup')){var txt=JSON.stringify(S);
-    var done=function(){toast('Backup copied')};
+    var done=function(){lsSet('-bk',Date.now());toast('Backup copied');render()};
     try{navigator.clipboard.writeText(txt).then(done,function(){fallbackCopy(txt)})}catch(e){fallbackCopy(txt)}return}
   if(t.hasAttribute('data-restore-open')){$('restorebox').hidden=false;$('rt').focus();return}
   if(t.hasAttribute('data-restore')){try{var o=JSON.parse($('rt').value);if(!o||!o.expenses||!(o.sources||o.pay)||!o.sv)throw 0;S=normalize(o);commit();toast('Backup restored')}catch(e){toast('That is not a valid backup')}return}
@@ -712,7 +773,7 @@ function armDelete2(btn){
   if(btn.dataset.armed){S=defaults();commit();toast('Reset to example data');return}
   btn.dataset.armed='1';btn.textContent='Tap again to erase everything and reset';setTimeout(function(){if(btn.isConnected){delete btn.dataset.armed;btn.textContent='Reset to example data'}},3500);
 }
-function fallbackCopy(txt){
+function fallbackCopy(txt){lsSet('-bk',Date.now());
   openSheet('<h3>Copy your backup</h3><textarea id="bk" readonly spellcheck="false"></textarea><div class="acts"><div class="r"><button type="button" class="btn primary" data-close>Done</button></div></div>','bk');
   var ta=$('bk');ta.value=txt;ta.select();
 }
@@ -722,6 +783,7 @@ document.addEventListener('change',function(ev){
   var t=ev.target;
   if(t.id==='ef2'){syncFreq();return}
   if(t.id==='dl'){syncDebt();return}
+  if(t.id==='w3f'){$('w3dw').hidden=t.value!=='Monthly';return}
   if(t.dataset.plan){S.plan[t.dataset.plan]=t.dataset.plan==='months'?+t.value:num(t.value);commit();return}
   if(t.dataset.sv){var k=t.dataset.sv;S.sv[k]=(k==='comp'||k==='asOf')?t.value:k==='months'?Math.min(24,Math.max(1,Math.round(num(t.value,12)))):num(t.value);commit();return}
   if(t.dataset.src){var q=t.dataset.src.split(':'),s=S.sources[+q[0]],key=q[1];
@@ -731,6 +793,13 @@ document.addEventListener('change',function(ev){
 });
 document.addEventListener('submit',function(ev){
   ev.preventDefault();var f=ev.target;
+  if(f.id==='w1'){
+    var s0=S.sources[0];s0.amount=num($('w1a').value);s0.every=Math.max(1,Math.round(num($('w1e').value,14)));s0.anchor=$('w1d').value;S.nSrc=1;save();wizard(2);return;
+  }
+  if(f.id==='w3'){
+    var fq=$('w3f').value,wo={id:uid(),title:$('w3t').value.trim(),amount:num($('w3a').value),freq:fq,due:fq==='Monthly'&&$('w3d').value!==''?Math.min(31,Math.max(1,Math.round(num($('w3d').value)))):''};
+    S.expenses.push(wo);WN.push(wo.title);save();wizard(3);toast('Added '+wo.title);return;
+  }
   if(f.id==='ef'){
     var o={id:f.dataset.id,title:$('et').value.trim(),amount:num($('ea').value),freq:$('ef2').value,due:$('ed').value===''?'':Math.min(31,Math.max(1,Math.round(num($('ed').value))))};
     if(o.freq!=='Monthly'){o.due='';S.debts.forEach(function(d){if(d.link===o.id)d.link=''})}
@@ -743,13 +812,14 @@ document.addEventListener('submit',function(ev){
   }else if(f.id==='df'){
     var dd={id:f.dataset.id,name:$('dn').value.trim(),type:$('dt').value,link:$('dl').value,start:num($('db').value),apr:num($('dr').value),
       min:$('dl').value?'':num($('dm').value),due:$('dl').value?'':($('du').value===''?'':Math.min(31,Math.max(1,Math.round(num($('du').value))))),
-      prio:$('dp2').value===''?'':Math.round(num($('dp2').value)),actual:$('da').value===''?'':num($('da').value)};
+      prio:$('dp2').value===''?'':Math.round(num($('dp2').value))};
+    var old=S.debts.filter(function(y){return y.id===dd.id})[0];dd.asOf=old&&old.asOf&&num(old.start)===dd.start?old.asOf:dnISO(monthStart(todayDN()));
     var x=S.debts.findIndex(function(y){return y.id===dd.id});if(x<0)S.debts.push(dd);else S.debts[x]=dd;
     closeSheet();commit();toast('Debt saved');
   }
 });
 
-S=load();render();
+S=load();if(!lsGet('-first'))lsSet('-first',Date.now());save();render();
 })();
 </script>
 
