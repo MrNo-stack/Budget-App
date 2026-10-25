@@ -229,7 +229,7 @@ function defaults(){
     sources:[s0,newSource(1,0,anchor),newSource(2,0,anchor),newSource(3,0,anchor)], nSrc:1,
     expenses:ex, entries:[],
     plan:{months:3,startBal:0},
-    sv:{start:1000,asOf:anchor,apr:4.5,comp:'Monthly',months:12,mode:'pct',pct:100,fixed:0,actual:{}},
+    sv:{start:1000,asOf:anchor,apr:4.5,comp:'Monthly',months:12,mode:'pct',pct:50,fixed:0,init:1,actual:{}},
     debts:[{id:uid(),name:'Credit Card',type:'Credit Card',link:id('Credit Card Payment'),start:3000,apr:22.99,min:'',due:'',prio:'',asOf:dnISO(monthStart(T))},
       {id:uid(),name:'Car Loan',type:'Auto Loan',link:id('Car Payment'),start:9000,apr:6.5,min:'',due:'',prio:'',asOf:dnISO(monthStart(T))},
       {id:uid(),name:'Student Loan',type:'Student Loan',link:id('Student Loan'),start:15000,apr:5,min:'',due:'',prio:'',asOf:dnISO(monthStart(T))}],
@@ -252,7 +252,8 @@ function normalize(o){
   o.sources.forEach(function(s){if(s.pat.length>7)s.pat=s.pat.slice(0,7);if(!s.freq)s.freq=num(s.every)===7?'Weekly':'Bi-Weekly'});
   while(o.sources.length<MAXSRC)o.sources.push(newSource(o.sources.length,0,o.sources[0].anchor));
   if(!o.nSrc)o.nSrc=1;
-  o.sv=Object.assign({mode:'pct',pct:100,fixed:0,actual:{}},o.sv||d.sv);
+  o.sv=Object.assign({mode:'pct',pct:50,fixed:0,actual:{}},o.sv||d.sv);
+  if(!o.sv.init){if(o.sv.mode==='pct'&&num(o.sv.pct)===100)o.sv.pct=50;o.sv.init=1}
   if(!o.debts)o.debts=[];
   o.debts.forEach(function(d){if(!d.asOf)d.asOf=dnISO(monthStart(todayDN()))});
   if(!o.dcfg)o.dcfg=d.dcfg;
@@ -402,7 +403,7 @@ function compute(S){
         if(mp[i]>0)pays.push({dn:toDN(ya,ma,Math.min(dues[i],ndays)),amt:mp[i],id:d.id,name:d.name||'Debt'});
         if(lump[i]>0){var raw=lumpRaw(d.id,lumpA,me),k=lump[i]/raw;
           S.entries.forEach(function(en){if(en.debt!==d.id||en.type==='bonus')return;var dn=isoDN(en.date);if(!isNaN(dn)&&dn>=lumpA&&dn<=me)pays.push({dn:dn,amt:Math.abs(num(en.amount))*k,id:d.id,name:d.name||'Debt'})})}
-        if(alloc[i]>0){var pd=payDates(ms,me),ex=pd.length?pd[pd.length-1].dn:me;pays.push({dn:ex,amt:alloc[i],id:d.id,name:d.name||'Debt'})}
+        if(alloc[i]>0){var pd=payDates(ms,me),ex=pd.length?pd[pd.length-1].dn:me;pays.push({dn:ex,amt:alloc[i],id:d.id,name:d.name||'Debt',ex:1})}
       });
       prev=close;
     }
@@ -415,13 +416,13 @@ function compute(S){
   }
   var simP=simDebts(false),simM=cfg.strategy==='Minimums only'?simP:simDebts(true);
   function debtOut(a,b){
-    var list={},tot=0;
-    if(simP)simP.pays.forEach(function(p){if(p.dn>=a&&p.dn<=b){list[p.id]=list[p.id]||{title:p.name,v:0};list[p.id].v+=p.amt;tot+=p.amt}});
-    return {tot:tot,list:Object.keys(list).map(function(k){return list[k]})};
+    var list={},tot=0,exT=0;
+    if(simP)simP.pays.forEach(function(p){if(p.dn>=a&&p.dn<=b){list[p.id]=list[p.id]||{title:p.name,v:0};list[p.id].v+=p.amt;tot+=p.amt;if(p.ex)exT+=p.amt}});
+    return {exT:exT,tot:tot,list:Object.keys(list).map(function(k){return list[k]})};
   }
   function period(p){
     var b=pbase(p),d=debtOut(p.from,p.to);
-    b.debt=d.tot;b.debtList=d.list;b.out=b.outBase+d.tot;b.left=b.leftBase-d.tot;
+    b.debt=d.tot;b.debtEx=d.exT;b.debtList=d.list;b.out=b.outBase+d.tot;b.left=b.leftBase-d.tot;
     var dues=[];
     for(var dn=p.from;dn<=p.to;dn++){var c=dayPlan(dn);for(var id in c){var ex=exPlan.filter(function(x){return x.id===id})[0];if(ex&&PLANNED[ex.freq])dues.push({dn:dn,title:ex.title,v:c[id]})}}
     if(simP)simP.pays.forEach(function(x){if(x.dn>=p.from&&x.dn<=p.to)dues.push({dn:x.dn,title:x.name,v:x.amt})});
@@ -447,7 +448,7 @@ function compute(S){
     var hasAct=act!==undefined&&act!==''&&act!==null&&!isNaN(parseFloat(act));
     var plan0;
     if(S.sv.mode==='fixed'){plan0=0;for(var q2=p.from;q2<=p.to;q2++){var dt2=dnDate(q2);plan0+=num(S.sv.fixed)/dim(dt2.getUTCFullYear(),dt2.getUTCMonth())}}
-    else plan0=r2.left>0?r2.left*Math.min(100,Math.max(0,num(S.sv.pct,100)))/100:r2.left;
+    else{var base0=r2.left+r2.debtEx;plan0=base0>0?base0*Math.min(100,Math.max(0,num(S.sv.pct,100)))/100:r2.left}
     var saved=hasAct?parseFloat(act):plan0;r2.planSave=plan0;
     var interest=open*(Math.pow(1+apr/n,n*(p.to-p.from+1)/365)-1);
     var close=open+interest+saved;
@@ -480,7 +481,7 @@ function compute(S){
   var dAvail=leftNow-(cm?cm.mins+cm.lump:0);
   var dExtra=cfg.strategy==='Minimums only'?0:(cm?cm.extra:0);
   var sAvail=dAvail-dExtra;
-  var sInvest=S.sv.mode==='fixed'?num(S.sv.fixed):Math.max(0,sAvail)*Math.min(100,Math.max(0,num(S.sv.pct,100)))/100;
+  var sInvest=S.sv.mode==='fixed'?num(S.sv.fixed):Math.max(0,dAvail)*Math.min(100,Math.max(0,num(S.sv.pct,100)))/100;
   return {T:T,lastPay:lastPay,nextPay:nextPay,nextPayAmt:nextPayAmt,work:work,inc:inc,totalMonthly:totalMonthly,leftMonth:inc-totalMonthly,
     setAside:upc.tot,upcPer:upc.per,wdUntil:wdUntil,extraMonth:extraM,pcnt:pcAll.slice(0,6),pcNow:pcAll[0].c,minCount:mn,plan:plan,sv:sv,balNow:cur?cur.close:num(S.sv.start),
     bal3:balAt(addMonths(T,3)),bal6:balAt(addMonths(T,6)),balN:balAt(slim),
@@ -501,7 +502,7 @@ function backupDue(){
   return last?(now-last)/864e5>=30:(first&&(now-first)/864e5>=14);
 }
 var tab='budget', M=null;
-var TABS=[['budget','Budget'],['paychecks','Paychecks'],['savings','Savings'],['debt','Debt'],['settings','Settings']];
+var TABS=[['budget','Budget'],['paychecks','Paychecks'],['debt','Debt'],['savings','Savings'],['settings','Settings']];
 try{var t0=localStorage.getItem(KEY+'-tab');if(t0&&TABS.some(function(x){return x[0]===t0}))tab=t0}catch(e){}
 var $=function(id){return document.getElementById(id)};
 
