@@ -81,6 +81,7 @@ h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute
 .helptext{font-size:12.5px;color:var(--ink);background:var(--surface2);border-radius:9px;padding:9px 11px;line-height:1.4}
 .helptext p{margin:0 0 6px}.helptext p:last-child{margin:0}
 .calc{font-family:var(--mono);font-size:18px;font-weight:700;padding:10px 11px;background:var(--surface2);border-radius:9px}
+.pcx{grid-column:1/-1;margin-top:6px;font-size:12.5px;font-weight:600;color:var(--accent)}
 .pcwarn{grid-column:1/-1;margin-top:8px;font-size:12.5px;line-height:1.35;background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:7px 9px;font-weight:600}
 .avail{background:var(--surface2);border-radius:12px;padding:12px 14px}
 .avail .l{font-size:12.5px;font-weight:700;color:var(--muted)}
@@ -382,6 +383,10 @@ function compute(S){
     periodsFrom(payDates(ms,me+maxEv+1),me).forEach(function(p){s+=pbase(p).leftBase});
     return lm[ms]=s;
   }
+  var mpc={};
+  function monthPeriods(ms){if(mpc[ms])return mpc[ms];var me=addMonths(ms,1)-1;return mpc[ms]=periodsFrom(payDates(ms,me+maxEv+1),me).map(pbase)}
+  /* share an amount across paychecks as evenly as possible without passing any paycheck's room */
+  function spread(T,caps){var x=caps.map(function(){return 0}),ord=caps.map(function(c,j){return j}).sort(function(a,b){return caps[a]-caps[b]}),rem=T,k=caps.length;ord.forEach(function(j){var a=Math.min(caps[j],rem/k);x[j]=a;rem-=a;k--});return x}
   function lumpRaw(id,a,b){
     var s=0;S.entries.forEach(function(en){if(en.debt!==id||en.type==='bonus')return;var dn=isoDN(en.date);if(!isNaN(dn)&&dn>=a&&dn<=b)s+=Math.abs(num(en.amount))});
     return s;
@@ -412,19 +417,37 @@ function compute(S){
       var rem=bal.map(function(b,i){return A[i]?Math.max(0,b-mp[i]-lump[i]):b});
       var sumMp=mp.reduce(function(s,x){return s+x},0);
       var extra=minOnly?0:(cfg.mode==='pct'?num(cfg.pct)/100*Math.max(0,leftoverMonth(ms)-sumMinA):num(cfg.fixed));
-      var pool=minOnly?0:Math.max(0,sumMinA+extra-sumMp),alloc=DB.map(function(){return 0});
+      var poolT=minOnly?0:Math.max(0,sumMinA+extra-sumMp),alloc=DB.map(function(){return 0}),xs=[],PP=[];
+      if(poolT>0){
+        var yb=dnDate(ms).getUTCFullYear(),mb=dnDate(ms).getUTCMonth(),ms2=addMonths(ms,1),y2=dnDate(ms2).getUTCFullYear(),mb2=dnDate(ms2).getUTCMonth(),nd2=dim(y2,mb2);
+        PP=monthPeriods(ms).filter(function(p){return ms<monthStart(T)||p.from>=T});
+        var caps=PP.map(function(p){
+          var c=p.leftBase;
+          DB.forEach(function(dbt,i){
+            var dA=toDN(yb,mb,Math.min(dues[i],ndays)),dB=toDN(y2,mb2,Math.min(dues[i],nd2));
+            if(A[i]&&dA>=p.from&&dA<=p.to)c-=mp[i];
+            if(stamps[i]<=ms2&&rem[i]>0&&dB>=p.from&&dB<=p.to)c-=mins[i];
+            c-=lumpRaw(dbt.id,p.from,p.to);
+          });
+          return Math.max(0,c);
+        });
+        xs=spread(poolT,caps);
+      }
+      var pool=xs.reduce(function(t3,x){return t3+x},0),voidAmt=poolT-pool;
       rk.forEach(function(i){if(!A[i])return;var a=Math.max(0,Math.min(rem[i],pool));alloc[i]=a;pool-=a});
       var close=rem.map(function(r,i){var c=r-alloc[i];return c<0.005&&A[i]?0:c});
       var sumAlloc=alloc.reduce(function(s,x){return s+x},0),sumLump=lump.reduce(function(s,x){return s+x},0);
-      months.push({ms:ms,close:close,paid:sumMp+sumLump+sumAlloc,int:interest,extra:sumAlloc,lump:sumLump,mins:sumMp,sumMinA:sumMinA});
+      months.push({ms:ms,close:close,paid:sumMp+sumLump+sumAlloc,int:interest,extra:sumAlloc,lump:sumLump,mins:sumMp,sumMinA:sumMinA,void:voidAmt});
       /* dated payments: minimums on the due day, lumps on their own date, extra on the month's last payday */
       var ya=dnDate(ms).getUTCFullYear(),ma=dnDate(ms).getUTCMonth();
       DB.forEach(function(d,i){
         if(mp[i]>0)pays.push({dn:toDN(ya,ma,Math.min(dues[i],ndays)),amt:mp[i],id:d.id,name:d.name||'Debt'});
         if(lump[i]>0){var raw=lumpRaw(d.id,lumpA,me),k=lump[i]/raw;
-          S.entries.forEach(function(en){if(en.debt!==d.id||en.type==='bonus')return;var dn=isoDN(en.date);if(!isNaN(dn)&&dn>=lumpA&&dn<=me)pays.push({dn:dn,amt:Math.abs(num(en.amount))*k,id:d.id,name:d.name||'Debt'})})}
-        if(alloc[i]>0){var pd=payDates(ms,me),ex=pd.length?pd[pd.length-1].dn:me;pays.push({dn:ex,amt:alloc[i],id:d.id,name:d.name||'Debt',ex:1})}
+          S.entries.forEach(function(en){if(en.debt!==d.id||en.type==='bonus')return;var dn=isoDN(en.date);if(!isNaN(dn)&&dn>=lumpA&&dn<=me)pays.push({dn:dn,amt:Math.abs(num(en.amount))*k,id:d.id,name:d.name||'Debt',lump:1})})}
       });
+      /* extra payments: one slice on each paycheck in the month, never more than that paycheck can spare */
+      var qx=rk.filter(function(i){return alloc[i]>0}).map(function(i){return {i:i,r:alloc[i]}});
+      PP.forEach(function(p,j){var room=xs[j];qx.forEach(function(it){if(room<=0.004||it.r<=0.004)return;var tk=Math.min(room,it.r);room-=tk;it.r-=tk;pays.push({dn:p.from,amt:tk,id:DB[it.i].id,name:DB[it.i].name||'Debt',ex:1})})});
       prev=close;
     }
     var done=months.length-1;while(done>0&&months[done].close.every(function(b){return b<=0.005})&&months[done-1].close.every(function(b){return b<=0.005}))done--;
@@ -437,7 +460,7 @@ function compute(S){
   var simP=simDebts(false),simM=cfg.strategy==='Minimums only'?simP:simDebts(true);
   function debtOut(a,b){
     var list={},tot=0,exT=0;
-    if(simP)simP.pays.forEach(function(p){if(p.dn>=a&&p.dn<=b){list[p.id]=list[p.id]||{title:p.name,v:0};list[p.id].v+=p.amt;tot+=p.amt;if(p.ex)exT+=p.amt}});
+    if(simP)simP.pays.forEach(function(p){if(p.dn>=a&&p.dn<=b){list[p.id]=list[p.id]||{title:p.name,v:0,mn:0,xd:0};list[p.id].v+=p.amt;tot+=p.amt;if(p.ex)exT+=p.amt;if(p.ex||p.lump)list[p.id].xd+=p.amt;else list[p.id].mn+=p.amt}});
     return {exT:exT,tot:tot,list:Object.keys(list).map(function(k){return list[k]})};
   }
   function period(p){
@@ -500,6 +523,7 @@ function compute(S){
   if(simP){var kk2=Math.max(0,monthsBetween(simP.asOf,ms0));cm=simP.months[kk2+1]||null}
   var dAvail=leftNow-(cm?cm.mins+cm.lump:0);
   var dExtra=cfg.strategy==='Minimums only'?0:(cm?cm.extra:0);
+  var dVoid=cm&&cm.void?cm.void:0;
   var sAvail=dAvail-dExtra;
   var sInvest=S.sv.mode==='fixed'?num(S.sv.fixed):Math.max(0,dAvail)*Math.min(100,Math.max(0,num(S.sv.pct,100)))/100;
   return {T:T,lastPay:lastPay,nextPay:nextPay,nextPayAmt:nextPayAmt,work:work,inc:inc,totalMonthly:totalMonthly,leftMonth:inc-totalMonthly,
@@ -508,7 +532,7 @@ function compute(S){
     savedN:win.reduce(function(s,r){return s+r.saved},0),intN:win.reduce(function(s,r){return s+r.interest},0),slim:slim,
     entryPay:function(dn){if(isNaN(dn))return '';if(dn<sstart)return 'Before savings start';
       for(var i=0;i<sv.length;i++)if(dn>=sv[i].from&&dn<=sv[i].to)return fdy(sv[i].from);return 'Beyond projection'},
-    perUnit:perUnit,dim0:dim0,
+    perUnit:perUnit,dim0:dim0,dVoid:dVoid,
     dAvail:dAvail,dExtra:dExtra,sAvail:sAvail,sInvest:sInvest,
     ex:exAll,payDates:payDates,linked:linked,linkOf:linkOf,minOf:minOf,dueOf:dueOf,dsum:dsum,DB:DB,SRC:SRC};
 }
@@ -605,15 +629,16 @@ function viewPaychecks(){
     var tag=r.status==='Next payday'?'<span class="pill warn">Next payday</span>':r.status==='Current'?'<span class="pill pos">Current</span>':r.status==='Past'?'<span class="pill">Past</span>':'';
     h+='<details class="card pc"'+(i<2?' open':'')+'><summary><span class="range">'+fd(r.from)+' – '+fd(r.to)+' '+tag+'</span><span class="left" style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m0(r.left)+'</span>'+
       '<span class="muted" style="font-size:12.5px">'+spent.toFixed(0)+'% of pay spent</span><span class="muted" style="font-size:12.5px;text-align:right">left over</span>'+
-      '<span class="bar"><i class="'+(r.out>r.pay+r.bonus?'over':'')+'" style="width:'+spent+'%"></i></span>'+(warn[i]||'')+'</summary><div class="det">'+
+      '<span class="bar"><i class="'+(r.out>r.pay+r.bonus?'over':'')+'" style="width:'+spent+'%"></i></span>'+(function(){var xl=(r.debtList||[]).filter(function(x){return x.xd>0.004});return xl.length?'<span class="pcx">Extra debt payment: '+xl.map(function(x){return m0(x.xd)+' → '+esc(x.title)}).join(' · ')+'</span>':''})()+(warn[i]||'')+'</summary><div class="det">'+
       '<div class="li"><span>Pay</span><span>'+m2(r.pay)+'</span></div>'+
       (r.bonus?'<div class="li"><span>Bonus / extra pay</span><span style="color:var(--pos)">+'+m2(r.bonus)+'</span></div>':'')+
       '<div class="li"><span>Planned bills</span><span>'+m2(r.planned)+'</span></div>'+
       r.rec.map(function(x){return '<div class="li sub"><span>'+esc(x.title)+'</span><span>'+m2(x.v)+'</span></div>'}).join('')+
       '<div class="li"><span>Unplanned / one-time</span><span>'+m2(r.unplanned)+'</span></div>'+
-      (r.debt>0.004?'<div class="li"><span>Debt payments</span><span>'+m2(r.debt)+'</span></div>'+r.debtList.map(function(x){return '<div class="li sub"><span>'+esc(x.title)+'</span><span>'+m2(x.v)+'</span></div>'}).join(''):'')+
+      (r.debt>0.004?'<div class="li"><span>Debt payments</span><span>'+m2(r.debt)+'</span></div>'+r.debtList.map(function(x){return (x.mn>0.004?'<div class="li sub"><span>'+esc(x.title)+' · minimum</span><span>'+m2(x.mn)+'</span></div>':'')+(x.xd>0.004?'<div class="li sub"><span>Extra → '+esc(x.title)+'</span><span style="color:var(--accent);font-weight:700">'+m2(x.xd)+'</span></div>':'')}).join(''):'')+
       '<div class="li strong"><span>Total out</span><span>'+m2(r.out)+'</span></div>'+
-      '<div class="li strong"><span>Left over</span><span style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m2(r.left)+'</span></div></div></details>';
+      '<div class="li strong"><span>Left over</span><span style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m2(r.left)+'</span></div>'+
+      '<div style="padding-top:10px"><button type="button" class="btn" data-add-entry-pay="'+r.from+'">+ Expense or bonus</button></div></div></details>';
   });
   h+='</div></section>';
   var en=S.entries.slice().sort(function(a,b){return isoDN(a.date)-isoDN(b.date)});
@@ -688,7 +713,7 @@ function viewSavings(){
 }
 function fld(label,id,type,key,val,extra){return '<div class="field"><label for="'+id+'">'+label+'</label><input id="'+id+'" type="'+type+'" data-sv="'+key+'" value="'+esc(val)+'" '+extra+'></div>'}
 
-function remHTML(){var r=M.sAvail-M.sInvest;return '<div class="l">'+(r<-0.5?'Over your available extra this month by':'Remaining extra available this month')+'</div><div class="v '+(r<-0.5?'neg':'pos')+'">'+m0(Math.abs(r))+'</div><div class="s">'+m0(M.dAvail)+' left after bills and minimums · '+m0(M.dExtra)+' to debt · '+m0(M.sInvest)+' to investing</div>'}
+function remHTML(){var r=M.sAvail-M.sInvest;return '<div class="l">'+(r<-0.5?'Over your available extra this month by':'Remaining extra available this month')+'</div><div class="v '+(r<-0.5?'neg':'pos')+'">'+m0(Math.abs(r))+'</div><div class="s">'+m0(M.dAvail)+' left after bills and minimums · '+m0(M.dExtra)+' to debt · '+m0(M.sInvest)+' to investing</div>'+(M.dVoid>0.5?'<div class="s" style="color:var(--warn);font-weight:600;margin-top:6px">⚠ '+m0(M.dVoid)+' of your extra does not fit in this month\'s paychecks, so it is skipped.</div>':'')}
 function dRem(){return remHTML()}
 function sRem(){return remHTML()}
 function dRemOld(){var r=M.dAvail-M.dExtra;return '<div class="l">'+(r<0?'Over your available extra this month by':'Remaining extra available this month')+'</div><div class="v '+(r<0?'neg':'pos')+'">'+m0(Math.abs(r))+'</div><div class="s">'+m0(M.dAvail)+' left after bills and minimums · '+m0(M.dExtra)+' going to debt</div>'}
@@ -807,9 +832,9 @@ function syncFreq(){
   $('fh').textContent={'Daily':'Charged every day. Your monthly total is this amount times the days in the month.','Weekly':'Spread evenly over the week and shown in its own column on each paycheck.','Work Days':'Charged only on the days you work. Your monthly total is this amount times your work days in the month.','Bi-Weekly':'Charged every two weeks, spread evenly across your paychecks.','Monthly':'Charged in full on its due day.','Monthly (Last Day)':'Charged in full on the last day of every month, whatever its length.'}[v]||'';
   updMtot();
 }
-function entrySheet(id){
+function entrySheet(id,dn0){
   var e=S.entries.filter(function(x){return x.id===id})[0],isNew=!e;
-  if(isNew)e={id:uid(),type:'expense',desc:'',date:dnISO(M.nextPay),amount:'',debt:''};
+  if(isNew)e={id:uid(),type:'expense',desc:'',date:dnISO(dn0||M.nextPay),amount:'',debt:''};
   openSheet('<h3>'+(isNew?'Add to paycheck plan':'Edit entry')+'</h3><form id="nf" class="form" style="padding:0" data-id="'+e.id+'" data-new="'+(isNew?1:0)+'" data-type="'+e.type+'">'+
     '<div class="seg" role="group" aria-label="Type"><button type="button" data-type="expense" aria-pressed="'+(e.type!=='bonus')+'">Expense</button><button type="button" data-type="bonus" aria-pressed="'+(e.type==='bonus')+'">Bonus</button></div>'+
     '<div class="field"><label for="nd">Description</label><input id="nd" value="'+esc(e.desc)+'" placeholder="Trip, car repair, year-end bonus" autocomplete="off"></div>'+
@@ -877,6 +902,7 @@ document.addEventListener('click',function(ev){
   if(t.hasAttribute('data-snooze')){lsSet('-snooze',Date.now()+14*864e5);render();return}
   if(t.hasAttribute('data-add-expense')){expenseSheet();return}
   if(t.dataset.edit){expenseSheet(t.dataset.edit);return}
+  if(t.dataset.addEntryPay){entrySheet(null,+t.dataset.addEntryPay);return}
   if(t.hasAttribute('data-add-entry')){entrySheet();return}
   if(t.dataset.editEntry){entrySheet(t.dataset.editEntry);return}
   if(t.hasAttribute('data-add-debt')){debtSheet();return}
