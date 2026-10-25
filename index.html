@@ -124,7 +124,8 @@ svg[data-ch]{touch-action:pan-y;cursor:crosshair;-webkit-user-select:none;user-s
 .legend i.dash{border-top:2px dashed var(--muted)}
 .sched{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
 .sched .dn{font-size:11.5px;text-align:center;color:var(--muted);font-weight:700}
-.sched button{font:inherit;font-weight:700;border-radius:9px;border:1px solid var(--line);background:var(--surface2);color:var(--muted);min-height:40px;cursor:pointer}
+.sched button{font:inherit;font-size:11px;font-weight:700;padding:0;min-width:0;letter-spacing:-.2px;border-radius:9px;border:1px solid var(--line);background:var(--surface2);color:var(--muted);min-height:40px;cursor:pointer}
+@media(max-width:350px){.sched{gap:4px}.sched button{font-size:9.5px}}
 .sched button[aria-pressed=true]{background:var(--pos-bg);color:var(--pos);border-color:var(--pos)}
 nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:25;background:var(--surface);border-top:1px solid var(--line);
   padding:6px max(10px,env(safe-area-inset-left,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-right,0px))}
