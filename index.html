@@ -80,6 +80,7 @@ h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute
 .q[aria-expanded=true]{background:var(--accent);border-color:var(--accent);color:#fff}
 .helptext{font-size:12.5px;color:var(--ink);background:var(--surface2);border-radius:9px;padding:9px 11px;line-height:1.4}
 .helptext p{margin:0 0 6px}.helptext p:last-child{margin:0}
+.calc{font-family:var(--mono);font-size:18px;font-weight:700;padding:10px 11px;background:var(--surface2);border-radius:9px}
 .avail{background:var(--surface2);border-radius:12px;padding:12px 14px}
 .avail .l{font-size:12.5px;font-weight:700;color:var(--muted)}
 .avail .v{font-family:var(--mono);font-size:24px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
@@ -159,6 +160,7 @@ nav.tabs .in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:re
 nav.tabs button{font:inherit;font-weight:700;font-size:12.5px;border:0;background:none;color:var(--muted);padding:9px 2px 8px;border-radius:10px;cursor:pointer;position:relative}
 nav.tabs button[aria-current=page]{color:var(--accent);background:var(--surface2)}
 .scrim{position:fixed;inset:0;background:rgba(8,14,22,.55);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+[hidden]{display:none!important}
 .scrim[hidden]{display:none}
 .sheet{background:var(--surface);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom,0px));max-height:92%;overflow:auto;display:grid;gap:14px;border:1px solid var(--line)}
 .sheet h3{margin:0;font-size:18px}
@@ -185,6 +187,8 @@ textarea{font:12.5px/1.4 var(--mono);width:100%;min-height:110px;background:var(
 (function(){
 'use strict';
 /* ---------- constants & helpers ---------- */
+var RATED={'Daily':1,'Work Days':1,'Weekly':1,'Bi-Weekly':1};
+var RLAB={'Daily':'Daily amount','Work Days':'Work day amount','Weekly':'Weekly amount','Bi-Weekly':'Bi-weekly amount'};
 var FREQS=['Daily','Work Days','Weekly','Bi-Weekly','Monthly','Monthly (Last Day)'];
 var COMP={'Daily':365,'Weekly':52,'Monthly':12,'Quarterly':4,'Semi-annually':2,'Annually':1};
 var KEY='monthly-expenses-generic-v1', DAY=864e5;
@@ -222,11 +226,12 @@ function num(v,d){var n=parseFloat(v);return isNaN(n)?(d||0):n}
 function newSource(i,amount,anchor){return {name:'Pay source '+(i+1),amount:amount||0,every:14,freq:'Bi-Weekly',anchor:anchor||'2026-04-16',start:'2025-12-21',pat:[0,1,1,1,1,1,0]}}
 function defaults(){
   var E=function(t,a,f,d){return {id:uid(),title:t,amount:a,freq:f,due:d||''}};
+  var RT=function(t,r,f){return {id:uid(),title:t,amount:0,rate:r,freq:f,due:''}};
   var T=todayDN(), anchor=dnISO(T-5), x;
   var ex=[E('Rent',1300,'Monthly',1),E('Gym Membership',30,'Monthly',3),E('Car Payment',280,'Monthly',5),E('Student Loan',190,'Monthly',7),
     E('Internet',60,'Monthly',10),E('Streaming Services',15,'Monthly',12),E('Electricity',100,'Monthly',15),E('Credit Card Payment',75,'Monthly',18),
     E('Phone',50,'Monthly',20),E('Car Insurance',110,'Monthly',28),E('Renters Insurance',15,'Monthly (Last Day)'),
-    E('Groceries',400,'Daily'),E('Dining Out',150,'Daily'),E('Gas / Commute',120,'Work Days')];
+    RT('Groceries',13,'Daily'),RT('Dining Out',5,'Daily'),RT('Gas / Commute',6,'Work Days')];
   var id=function(n){return ex.filter(function(e){return e.title===n})[0].id};
   var s0=newSource(0,2400,anchor);
   return {
@@ -320,6 +325,14 @@ function compute(S){
   }
   var wdc={};
   function monthWD(y,m){var k=y+'-'+m;if(wdc[k]==null){var c=0,n=dim(y,m);for(var d=1;d<=n;d++)c+=work(toDN(y,m,d));wdc[k]=c}return wdc[k]}
+  /* per-unit expenses (daily, work day, weekly, bi-weekly): the monthly total comes from the amount per unit */
+  var dt0=dnDate(T),yy0=dt0.getUTCFullYear(),mm0=dt0.getUTCMonth(),dim0=dim(yy0,mm0);
+  function perUnit(e){return e.freq==='Daily'?dim0:e.freq==='Work Days'?monthWD(yy0,mm0):e.freq==='Weekly'?dim0/7:e.freq==='Bi-Weekly'?dim0/14:0}
+  S.expenses.forEach(function(e){
+    if(!RATED[e.freq])return;
+    if(e.rate==null||e.rate===''){var u=perUnit(e);e.rate=u?Math.round(num(e.amount)/u*100)/100:0}
+    e.amount=Math.round(num(e.rate)*perUnit(e)*100)/100;
+  });
   /* debts: a linked debt takes its minimum and due day from the Budget expense, and that expense leaves the paycheck plan (the debt payments replace it) */
   var DB=S.debts.filter(function(d){return num(d.start)>0});
   function linkOf(d){var e=d.link&&S.expenses.filter(function(x){return x.id===d.link})[0];return e&&e.freq==='Monthly'?e:null}
@@ -337,8 +350,9 @@ function compute(S){
         var a=num(e.amount),v=0,f=e.freq;
         if(f==='Monthly'){var due=Math.round(num(e.due,0));if(due>0&&(due===d||(due>n&&d===n)))v=a}
         else if(f==='Monthly (Last Day)'){if(d===n)v=a}
-        else if(f==='Daily'||f==='Weekly'){v=a/n}
-        else if(f==='Work Days'){v=wd?a*wk/wd:0}
+        else if(f==='Daily'){v=num(e.rate)}
+        else if(f==='Weekly'){v=num(e.rate)/7}
+        else if(f==='Work Days'){v=wk?num(e.rate):0}
         if(v)r[e.id]=v;
       });
       return dc[dn]=r;
@@ -348,7 +362,7 @@ function compute(S){
   function range(a,b,dayFn,list){
     var per={},tot=0;
     for(var dn=a;dn<=b;dn++){var c=dayFn(dn);for(var id in c){per[id]=(per[id]||0)+c[id];tot+=c[id]}}
-    list.forEach(function(e){if(e.freq==='Bi-Weekly'){var v=num(e.amount)/2*(b-a+1)/14;per[e.id]=(per[e.id]||0)+v;tot+=v}});
+    list.forEach(function(e){if(e.freq==='Bi-Weekly'){var v=num(e.rate)*(b-a+1)/14;per[e.id]=(per[e.id]||0)+v;tot+=v}});
     return {per:per,tot:tot};
   }
   /* one pay period before any debt payments */
@@ -493,6 +507,7 @@ function compute(S){
     savedN:win.reduce(function(s,r){return s+r.saved},0),intN:win.reduce(function(s,r){return s+r.interest},0),slim:slim,
     entryPay:function(dn){if(isNaN(dn))return '';if(dn<sstart)return 'Before savings start';
       for(var i=0;i<sv.length;i++)if(dn>=sv[i].from&&dn<=sv[i].to)return fdy(sv[i].from);return 'Beyond projection'},
+    perUnit:perUnit,dim0:dim0,
     dAvail:dAvail,dExtra:dExtra,sAvail:sAvail,sInvest:sInvest,
     ex:exAll,payDates:payDates,linked:linked,linkOf:linkOf,minOf:minOf,dueOf:dueOf,dsum:dsum,DB:DB,SRC:SRC};
 }
@@ -522,8 +537,7 @@ function closeSheet(){$('scrim').hidden=true;$('sheet').innerHTML=''}
 function dueText(e){
   if(e.freq==='Monthly')return e.due?'Due the '+ord(Math.round(num(e.due))):'No due day set';
   if(e.freq==='Monthly (Last Day)')return 'Due last day of month';
-  if(e.freq==='Bi-Weekly')return 'Half each paycheck';
-  return e.freq==='Work Days'?'Work days only':e.freq==='Weekly'?'Spread weekly':'Spread daily';
+  return m2(num(e.rate))+({'Daily':' per day','Work Days':' per work day','Weekly':' per week','Bi-Weekly':' every 2 weeks'}[e.freq]||'');
 }
 function sortKey(e){return e.freq==='Monthly'?num(e.due,31):e.freq==='Monthly (Last Day)'?32:40}
 function debtName(id){var d=S.debts.filter(function(x){return x.id===id})[0];return d?(d.name||'Debt'):''}
@@ -761,17 +775,27 @@ function expenseSheet(id){
   if(isNew)e={id:uid(),title:'',amount:'',freq:'Monthly',due:''};
   openSheet('<h3>'+(isNew?'New expense':'Edit expense')+'</h3><form id="ef" class="form" style="padding:0" data-id="'+e.id+'" data-new="'+(isNew?1:0)+'">'+
     '<div class="field"><label for="et">Title</label><input id="et" required value="'+esc(e.title)+'" autocomplete="off"></div>'+
-    '<div class="grid2"><div class="field"><label for="ea">Monthly amount</label><input id="ea" type="number" inputmode="decimal" step="0.01" min="0" required value="'+esc(e.amount)+'"></div>'+
+    '<div class="grid2"><div class="field"><label for="ea" id="eal">Monthly amount</label><input id="ea" type="number" inputmode="decimal" step="0.01" min="0" required value="'+esc(RATED[e.freq]?e.rate:e.amount)+'"></div>'+
     '<div class="field"><label for="ef2">Frequency</label><select id="ef2">'+FREQS.map(function(f){return '<option'+(f===e.freq?' selected':'')+'>'+f+'</option>'}).join('')+'</select></div></div>'+
+    '<div class="field" id="mtotw" hidden><span class="lab">Monthly total (this month)</span><div class="calc" id="mtot"></div><span class="hint" id="mtoth"></span></div>'+
     '<div class="field" id="duew"><label for="ed">Due day of month</label><input id="ed" type="number" inputmode="numeric" min="1" max="31" step="1" value="'+esc(e.due)+'"><span class="hint">Days past the end of a short month fall on its last day.</span></div>'+
     '<p class="muted" id="fh" style="margin:0;font-size:13px"></p>'+
     (M.linked[e.id]?'<p class="note" style="margin:0">Linked to the debt "'+esc(debtName(M.linked[e.id]))+'". Its payments come from the Debt tab, so this expense is left out of the paycheck bills.</p>':'')+
     '<div class="acts">'+(isNew?'':'<button type="button" class="btn danger" id="edel">Delete</button>')+'<div class="r"><button type="button" class="btn" data-close>Cancel</button><button type="submit" class="btn primary">Save</button></div></div></form>','et');
   syncFreq();
 }
+function updMtot(){
+  var f=$('ef2');if(!f)return;var v=f.value,w=$('mtotw');if(!w)return;
+  w.hidden=!RATED[v];if(!RATED[v])return;
+  var u=M.perUnit({freq:v});
+  $('mtot').textContent=m2(num($('ea').value)*u);
+  $('mtoth').textContent=({'Daily':'times the '+M.dim0+' days this month','Work Days':'times the '+Math.round(u)+' work days this month','Weekly':'times '+u.toFixed(1)+' weeks this month','Bi-Weekly':'times '+u.toFixed(1)+' two-week periods this month'}[v]||'')+'. It is worked out for you, so you only enter the amount above.';
+}
 function syncFreq(){
   var f=$('ef2');if(!f)return;var v=f.value;$('duew').hidden=v!=='Monthly';
-  $('fh').textContent={'Daily':'The monthly amount is spread evenly over every day.','Weekly':'The monthly amount is spread evenly over every day, and shows in its own column on each paycheck.','Work Days':'The monthly amount is spread over the days you work only.','Bi-Weekly':'Half the monthly amount comes out of each paycheck.','Monthly':'Charged in full on its due day.','Monthly (Last Day)':'Charged in full on the last day of every month, whatever its length.'}[v]||'';
+  var lab=$('eal');if(lab)lab.textContent=RLAB[v]||'Monthly amount';
+  $('fh').textContent={'Daily':'Charged every day. Your monthly total is this amount times the days in the month.','Weekly':'Spread evenly over the week and shown in its own column on each paycheck.','Work Days':'Charged only on the days you work. Your monthly total is this amount times your work days in the month.','Bi-Weekly':'Charged every two weeks, spread evenly across your paychecks.','Monthly':'Charged in full on its due day.','Monthly (Last Day)':'Charged in full on the last day of every month, whatever its length.'}[v]||'';
+  updMtot();
 }
 function entrySheet(id){
   var e=S.entries.filter(function(x){return x.id===id})[0],isNew=!e;
@@ -820,7 +844,7 @@ function wizard(step){
       '<div class="acts"><div class="r"><button type="button" class="btn primary" data-wnext="3">Next</button></div></div>');}
   else openSheet('<h3>Step 3 of 3 · Your bills</h3><p class="muted" style="margin:0;font-size:14px">Add each bill or regular spending. '+(WN.length?'<b>Added: '+esc(WN.join(', '))+'</b>':'You can add more any time on the Budget tab.')+'</p>'+
     '<form id="w3" class="form" style="padding:0"><div class="field"><label for="w3t">Title</label><input id="w3t" required autocomplete="off" placeholder="Rent, Groceries, Phone"></div>'+
-    '<div class="grid2"><div class="field"><label for="w3a">Monthly amount</label><input id="w3a" type="number" inputmode="decimal" step="0.01" min="0" required></div>'+
+    '<div class="grid2"><div class="field"><label for="w3a" id="w3al">Monthly amount</label><input id="w3a" type="number" inputmode="decimal" step="0.01" min="0" required></div>'+
     '<div class="field"><label for="w3f">Frequency</label><select id="w3f">'+FREQS.map(function(f){return '<option'+(f==='Monthly'?' selected':'')+'>'+f+'</option>'}).join('')+'</select></div></div>'+
     '<div class="field" id="w3dw"><label for="w3d">Due day of month</label><input id="w3d" type="number" inputmode="numeric" min="1" max="31" step="1"></div>'+
     '<div class="acts"><button type="button" class="btn" data-wdone>Done</button><div class="r"><button type="submit" class="btn primary">Add bill</button></div></div></form>','w3t');
@@ -880,7 +904,7 @@ document.addEventListener('change',function(ev){
   if(t.id==='ef2'){syncFreq();return}
   if(t.id==='dl'){syncDebt();return}
   if(t.id==='w1f'){var sh=needsAnchor(t.value);$('w1dw').hidden=!sh;$('w1d').required=sh;return}
-  if(t.id==='w3f'){$('w3dw').hidden=t.value!=='Monthly';return}
+  if(t.id==='w3f'){$('w3dw').hidden=t.value!=='Monthly';$('w3al').textContent=RLAB[t.value]||'Monthly amount';return}
   if(t.dataset.plan){S.plan[t.dataset.plan]=t.dataset.plan==='months'?+t.value:num(t.value);commit();return}
   if(t.dataset.sv){var k=t.dataset.sv;S.sv[k]=(k==='comp'||k==='asOf')?t.value:k==='months'?Math.min(24,Math.max(1,Math.round(num(t.value,12)))):num(t.value);commit();return}
   if(t.dataset.src){var q=t.dataset.src.split(':'),s=S.sources[+q[0]],key=q[1];
@@ -890,6 +914,7 @@ document.addEventListener('change',function(ev){
 });
 document.addEventListener('input',function(ev){
   var t=ev.target,e1;
+  if(t.id==='ea'){updMtot();return}
   if(t.dataset&&(t.dataset.dcfg==='fixed'||t.dataset.dcfg==='pct')){S.dcfg[t.dataset.dcfg]=num(t.value);save();M=compute(S);e1=$('dxrem');if(e1)e1.innerHTML=dRem();return}
   if(t.dataset&&(t.dataset.sv==='fixed'||t.dataset.sv==='pct')){S.sv[t.dataset.sv]=num(t.value);save();M=compute(S);e1=$('svrem');if(e1)e1.innerHTML=sRem()}
 });
@@ -899,11 +924,11 @@ document.addEventListener('submit',function(ev){
     var s0=S.sources[0];s0.amount=num($('w1a').value);s0.freq=$('w1f').value;s0.every=s0.freq==='Weekly'?7:14;if(needsAnchor(s0.freq))s0.anchor=$('w1d').value;S.nSrc=1;save();wizard(2);return;
   }
   if(f.id==='w3'){
-    var fq=$('w3f').value,wo={id:uid(),title:$('w3t').value.trim(),amount:num($('w3a').value),freq:fq,due:fq==='Monthly'&&$('w3d').value!==''?Math.min(31,Math.max(1,Math.round(num($('w3d').value)))):''};
+    var fq=$('w3f').value,wo={id:uid(),title:$('w3t').value.trim(),amount:RATED[fq]?0:num($('w3a').value),rate:RATED[fq]?num($('w3a').value):'',freq:fq,due:fq==='Monthly'&&$('w3d').value!==''?Math.min(31,Math.max(1,Math.round(num($('w3d').value)))):''};
     S.expenses.push(wo);WN.push(wo.title);save();wizard(3);toast('Added '+wo.title);return;
   }
   if(f.id==='ef'){
-    var o={id:f.dataset.id,title:$('et').value.trim(),amount:num($('ea').value),freq:$('ef2').value,due:$('ed').value===''?'':Math.min(31,Math.max(1,Math.round(num($('ed').value))))};
+    var fq0=$('ef2').value,av=num($('ea').value),o={id:f.dataset.id,title:$('et').value.trim(),amount:RATED[fq0]?0:av,rate:RATED[fq0]?av:'',freq:fq0,due:$('ed').value===''?'':Math.min(31,Math.max(1,Math.round(num($('ed').value))))};
     if(o.freq!=='Monthly'){o.due='';S.debts.forEach(function(d){if(d.link===o.id)d.link=''})}
     var i=S.expenses.findIndex(function(x){return x.id===o.id});if(i<0)S.expenses.push(o);else S.expenses[i]=o;
     closeSheet();commit();toast('Expense saved');
