@@ -478,8 +478,8 @@ function compute(S){
   var leftNow=leftoverMonth(ms0),cm=null;
   if(simP){var kk2=Math.max(0,monthsBetween(simP.asOf,ms0));cm=simP.months[kk2+1]||null}
   var dAvail=leftNow-(cm?cm.mins+cm.lump:0);
-  var dExtra=cfg.strategy==='Minimums only'?0:(cfg.mode==='pct'?num(cfg.pct)/100*Math.max(0,leftNow-(cm?cm.sumMinA:0)):num(cfg.fixed));
-  var sAvail=leftNow-(cm?cm.paid:0);
+  var dExtra=cfg.strategy==='Minimums only'?0:(cm?cm.extra:0);
+  var sAvail=dAvail-dExtra;
   var sInvest=S.sv.mode==='fixed'?num(S.sv.fixed):Math.max(0,sAvail)*Math.min(100,Math.max(0,num(S.sv.pct,100)))/100;
   return {T:T,lastPay:lastPay,nextPay:nextPay,nextPayAmt:nextPayAmt,work:work,inc:inc,totalMonthly:totalMonthly,leftMonth:inc-totalMonthly,
     setAside:upc.tot,upcPer:upc.per,wdUntil:wdUntil,extraMonth:extraM,pcnt:pcAll.slice(0,6),pcNow:pcAll[0].c,minCount:mn,plan:plan,sv:sv,balNow:cur?cur.close:num(S.sv.start),
@@ -658,8 +658,11 @@ function viewSavings(){
 }
 function fld(label,id,type,key,val,extra){return '<div class="field"><label for="'+id+'">'+label+'</label><input id="'+id+'" type="'+type+'" data-sv="'+key+'" value="'+esc(val)+'" '+extra+'></div>'}
 
-function dRem(){var r=M.dAvail-M.dExtra;return '<div class="l">'+(r<0?'Over your available extra this month by':'Remaining extra available this month')+'</div><div class="v '+(r<0?'neg':'pos')+'">'+m0(Math.abs(r))+'</div><div class="s">'+m0(M.dAvail)+' left after bills and minimums · '+m0(M.dExtra)+' going to debt</div>'}
-function sRem(){var r=M.sAvail-M.sInvest;return '<div class="l">'+(r<0?'Over your available money this month by':'Remaining after investing this month')+'</div><div class="v '+(r<0?'neg':'pos')+'">'+m0(Math.abs(r))+'</div><div class="s">'+m0(M.sAvail)+' left after bills and debt payments · '+m0(M.sInvest)+' invested</div>'}
+function remHTML(){var r=M.sAvail-M.sInvest;return '<div class="l">'+(r<-0.5?'Over your available extra this month by':'Remaining extra available this month')+'</div><div class="v '+(r<-0.5?'neg':'pos')+'">'+m0(Math.abs(r))+'</div><div class="s">'+m0(M.dAvail)+' left after bills and minimums · '+m0(M.dExtra)+' to debt · '+m0(M.sInvest)+' to investing</div>'}
+function dRem(){return remHTML()}
+function sRem(){return remHTML()}
+function dRemOld(){var r=M.dAvail-M.dExtra;return '<div class="l">'+(r<0?'Over your available extra this month by':'Remaining extra available this month')+'</div><div class="v '+(r<0?'neg':'pos')+'">'+m0(Math.abs(r))+'</div><div class="s">'+m0(M.dAvail)+' left after bills and minimums · '+m0(M.dExtra)+' going to debt</div>'}
+function sRemOld(){var r=M.sAvail-M.sInvest;return '<div class="l">'+(r<0?'Over your available money this month by':'Remaining after investing this month')+'</div><div class="v '+(r<0?'neg':'pos')+'">'+m0(Math.abs(r))+'</div><div class="s">'+m0(M.sAvail)+' left after bills and debt payments · '+m0(M.sInvest)+' invested</div>'}
 function viewDebt(){
   var c=S.dcfg,D=M.dsum,h='';
   h+='<section><h2>Payoff plan</h2><div class="card form">'+
