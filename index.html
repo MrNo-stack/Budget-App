@@ -71,8 +71,15 @@ h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute
 .field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .field label,.field .lab{font-size:12.5px;font-weight:700;color:var(--muted)}
 .field input,.field select{font:inherit;color:var(--ink);background:var(--input);border:1px solid var(--line);border-radius:9px;padding:10px 11px;min-height:42px;width:100%;min-width:0}
+.field input[type=date]{-webkit-appearance:none;appearance:none;max-width:100%;display:block;text-align:left}
+.field input::-webkit-date-and-time-value{text-align:left;min-width:0}
+.field{max-width:100%}
 .field input[type=number]{font-family:var(--mono)}
 .field input:disabled{background:var(--surface2);color:var(--muted)}
+.q{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:6px;border-radius:50%;border:1.5px solid var(--muted);background:none;color:var(--muted);font:700 11px/1 var(--font);padding:0;cursor:pointer;vertical-align:middle}
+.q[aria-expanded=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+.helptext{font-size:12.5px;color:var(--ink);background:var(--surface2);border-radius:9px;padding:9px 11px;line-height:1.4}
+.helptext p{margin:0 0 6px}.helptext p:last-child{margin:0}
 .field .hint{font-size:12px;color:var(--muted)}
 .form{padding:14px;display:grid;gap:12px}
 .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--surface2);border-radius:10px;padding:3px;gap:3px}
@@ -547,18 +554,22 @@ function lineChart(series,label,todayX,cid,mark){
   });
   if(mark){var ml=series[0].pts[series[0].pts.length-1];body+='<circle cx="'+X(ml[0])+'" cy="'+Y(ml[1])+'" r="6" fill="var(--pos)" stroke="var(--surface)" stroke-width="2"/><text x="'+(X(ml[0])-8)+'" y="'+(Y(ml[1])-12)+'" text-anchor="end" font-size="12" font-weight="700" fill="var(--pos)" font-family="var(--font)">'+esc(mark)+'</text>'}
   if(cid)CH[cid]={series:series,x0:x0,x1:x1,W:W,L:L,R:R,X:X,Y:Y,Tp:Tp,H:H,B:B};
-  return '<div class="readout" id="ro-'+cid+'" aria-live="polite"><span class="muted">Slide your finger along the line</span></div>'+
+  return '<div class="readout" id="ro-'+cid+'" aria-live="polite"></div>'+
     '<svg data-ch="'+cid+'" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(label)+'. Touch and slide to read values.">'+g+tx+body+xl+
     '<g class="scrub" display="none"><line y1="'+Tp+'" y2="'+(H-B)+'" stroke="var(--ink)" stroke-width="1.5"/><circle r="5.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/><circle class="c2" r="4.5" fill="var(--muted)" stroke="var(--surface)" stroke-width="2"/></g></svg>';
 }
+function helpQ(id,label){return '<button type="button" class="q" data-help="'+id+'" aria-expanded="false" aria-label="Help: '+label+'">?</button>'}
+function helpBox(id,html){return '<div class="helptext" id="help-'+id+'" hidden>'+html+'</div>'}
+var HELP_COMP='<p>How often the interest you earn is added to your balance, so it starts earning interest too.</p><p>Not sure? <b>Annually</b> is the safest choice, and it gives the most cautious projection. Many savings accounts add interest monthly or daily, which grows slightly faster.</p>';
+var HELP_STRAT='<p><b>Avalanche</b> puts extra money toward the highest interest rate first. It costs the least interest overall.</p><p><b>Snowball</b> puts extra money toward the smallest balance first. You clear debts sooner, which keeps you motivated.</p><p><b>Custom</b> uses the priority numbers you give each debt. 1 is paid first.</p><p><b>Minimums only</b> pays just the required minimums with nothing extra, so you can see the baseline.</p>';
 function viewSavings(){
   var v=S.sv,h='<section><h2>Savings inputs</h2><div class="card form"><div class="grid2">'+
     fld('Starting savings','sv0','number','start',v.start,'step="0.01" inputmode="decimal"')+
-    fld('Balance as of (a payday)','sv1','date','asOf',v.asOf,'')+
+    fld('Balance as of','sv1','date','asOf',v.asOf,'')+
     fld('Expected return (APR %)','sv2','number','apr',v.apr,'step="0.01" inputmode="decimal"')+
-    '<div class="field"><label for="sv3">Compounding</label><select id="sv3" data-sv="comp">'+Object.keys(COMP).map(function(k){return '<option'+(k===v.comp?' selected':'')+'>'+k+'</option>'}).join('')+'</select></div>'+
+    '<div class="field"><label for="sv3">Compounding'+helpQ('comp','Compounding')+'</label><select id="sv3" data-sv="comp">'+Object.keys(COMP).map(function(k){return '<option'+(k===v.comp?' selected':'')+'>'+k+'</option>'}).join('')+'</select></div>'+
     fld('Months ahead','sv4','number','months',v.months,'min="1" max="24" step="1" inputmode="numeric"')+
-    '</div>'+(M.payDates(isoDN(v.asOf),isoDN(v.asOf))[0]&&M.payDates(isoDN(v.asOf),isoDN(v.asOf))[0].dn===isoDN(v.asOf)?'':'<div class="note">The balance date is not on a payday, so the first row is a partial pay period.</div>')+'</div></section>';
+    '</div>'+helpBox('comp',HELP_COMP)+'<span class="muted" style="display:block;margin-top:10px;font-size:12.5px">Balance as of: the date your starting savings amount was true. Any date works. Your last payday is the easiest choice.</span>'+(M.payDates(isoDN(v.asOf),isoDN(v.asOf))[0]&&M.payDates(isoDN(v.asOf),isoDN(v.asOf))[0].dn===isoDN(v.asOf)?'':'<div class="note">The balance date is not on a payday, so the first row is a partial pay period.</div>')+'</div></section>';
   h+='<section><h2>Projection snapshot</h2><div class="metrics">'+
     '<div class="card metric"><div class="l">After current paycheck</div><div class="v">'+m0(M.balNow)+'</div></div>'+
     '<div class="card metric"><div class="l">In 3 months</div><div class="v">'+m0(M.bal3)+'</div></div>'+
@@ -580,7 +591,7 @@ function fld(label,id,type,key,val,extra){return '<div class="field"><label for=
 function viewDebt(){
   var c=S.dcfg,D=M.dsum,h='';
   h+='<section><h2>Payoff plan</h2><div class="card form">'+
-    '<div class="field"><span class="lab">Strategy</span><div class="seg two" role="group" aria-label="Strategy">'+STRATS.map(function(s){return '<button type="button" data-strat="'+s+'" aria-pressed="'+(c.strategy===s)+'">'+s+'</button>'}).join('')+'</div><span class="hint">'+STRAT_HINT[c.strategy]+'</span></div>'+
+    '<div class="field"><span class="lab">Strategy'+helpQ('strat','Strategy')+'</span>'+helpBox('strat',HELP_STRAT)+'<div class="seg two" role="group" aria-label="Strategy">'+STRATS.map(function(s){return '<button type="button" data-strat="'+s+'" aria-pressed="'+(c.strategy===s)+'">'+s+'</button>'}).join('')+'</div><span class="hint">'+STRAT_HINT[c.strategy]+'</span></div>'+
     (c.strategy==='Minimums only'?'':'<div class="field"><span class="lab">Extra payment each month</span><div class="seg" role="group" aria-label="Extra payment source"><button type="button" data-mode="fixed" aria-pressed="'+(c.mode==='fixed')+'">Fixed $</button><button type="button" data-mode="pct" aria-pressed="'+(c.mode==='pct')+'">% of leftover</button></div></div>'+
       (c.mode==='fixed'?'<div class="field"><label for="dx">Fixed extra per month</label><input id="dx" type="number" inputmode="decimal" min="0" step="0.01" data-dcfg="fixed" value="'+esc(c.fixed)+'"></div>'
         :'<div class="field"><label for="dp">Share of monthly leftover</label><input id="dp" type="number" inputmode="decimal" min="0" max="100" step="1" data-dcfg="pct" value="'+esc(c.pct)+'"><span class="hint">Percent of what is left after bills and minimum payments, month by month.</span></div>'))+'</div></section>';
@@ -650,7 +661,7 @@ function bindCharts(){
     }
     svg.addEventListener('pointerdown',function(e){try{svg.setPointerCapture(e.pointerId)}catch(x){}at(e)});
     svg.addEventListener('pointermove',function(e){if(e.pointerType==='mouse'||e.buttons||svg.hasPointerCapture&&svg.hasPointerCapture(e.pointerId))at(e)});
-    svg.addEventListener('pointerleave',function(e){if(e.pointerType==='mouse'){g.setAttribute('display','none');ro.innerHTML='<span class="muted">Slide your finger along the line</span>'}});
+    svg.addEventListener('pointerleave',function(e){if(e.pointerType==='mouse'){g.setAttribute('display','none');ro.innerHTML=''}});
   });
 }
 function render(){
@@ -754,6 +765,7 @@ document.addEventListener('click',function(ev){
   if(t.dataset.editEntry){entrySheet(t.dataset.editEntry);return}
   if(t.hasAttribute('data-add-debt')){debtSheet();return}
   if(t.dataset.editDebt){debtSheet(t.dataset.editDebt);return}
+  if(t.dataset.help){var hb=document.getElementById('help-'+t.dataset.help);if(hb){hb.hidden=!hb.hidden;t.setAttribute('aria-expanded',String(!hb.hidden))}return}
   if(t.dataset.strat){S.dcfg.strategy=t.dataset.strat;commit();return}
   if(t.dataset.mode){S.dcfg.mode=t.dataset.mode;commit();return}
   if(t.dataset.nsrc){S.nSrc=+t.dataset.nsrc;commit();return}
