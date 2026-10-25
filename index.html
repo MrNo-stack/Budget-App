@@ -583,7 +583,7 @@ function viewPaychecks(){
     var tag=r.status==='Next payday'?'<span class="pill warn">Next payday</span>':r.status==='Current'?'<span class="pill pos">Current</span>':r.status==='Past'?'<span class="pill">Past</span>':'';
     h+='<details class="card pc"'+(i<2?' open':'')+'><summary><span class="range">'+fd(r.from)+' – '+fd(r.to)+' '+tag+'</span><span class="left" style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m0(r.left)+'</span>'+
       '<span class="muted" style="font-size:12.5px">'+spent.toFixed(0)+'% of pay spent</span><span class="muted" style="font-size:12.5px;text-align:right">left over</span>'+
-      nextDue(r)+'<span class="bar"><i class="'+(r.out>r.pay+r.bonus?'over':'')+'" style="width:'+spent+'%"></i></span></summary><div class="det">'+
+      '<span class="bar"><i class="'+(r.out>r.pay+r.bonus?'over':'')+'" style="width:'+spent+'%"></i></span></summary><div class="det">'+
       '<div class="li"><span>Pay</span><span>'+m2(r.pay)+'</span></div>'+
       (r.bonus?'<div class="li"><span>Bonus / extra pay</span><span style="color:var(--pos)">+'+m2(r.bonus)+'</span></div>':'')+
       '<div class="li"><span>Planned bills</span><span>'+m2(r.planned)+'</span></div>'+
