@@ -81,6 +81,7 @@ h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute
 .helptext{font-size:12.5px;color:var(--ink);background:var(--surface2);border-radius:9px;padding:9px 11px;line-height:1.4}
 .helptext p{margin:0 0 6px}.helptext p:last-child{margin:0}
 .calc{font-family:var(--mono);font-size:18px;font-weight:700;padding:10px 11px;background:var(--surface2);border-radius:9px}
+.pcwarn{grid-column:1/-1;margin-top:8px;font-size:12.5px;line-height:1.35;background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:7px 9px;font-weight:600}
 .avail{background:var(--surface2);border-radius:12px;padding:12px 14px}
 .avail .l{font-size:12.5px;font-weight:700;color:var(--muted)}
 .avail .v{font-family:var(--mono);font-size:24px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
@@ -592,12 +593,19 @@ function viewPaychecks(){
   var pl=M.plan,h='<section><div class="card form"><div class="field"><label for="pm">Months to project</label><select id="pm" data-plan="months">'+
     [1,2,3,4,5,6].map(function(n){return '<option'+(n===S.plan.months?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div></div></section>';
   h+='<section><h2>Paycheck projection</h2><div class="pcs">';
+  var warn={};
+  pl.forEach(function(r,i){
+    if(r.status==='Past'||r.left<0)return;
+    var j=i+1,short=0,cnt=0;
+    while(j<pl.length&&pl[j].left<0){short+=-pl[j].left;cnt++;j++}
+    if(cnt)warn[i]='<span class="pcwarn">⚠ '+(cnt===1?'Next paycheck runs ':'Next '+cnt+' paychecks run ')+m0(short)+' short. '+(r.left>=short?'Set aside '+m0(short)+' now, leaving '+m0(r.left-short)+' real leftover.':'Set aside all '+m0(r.left)+' now. You will still be '+m0(short-r.left)+' short.')+'</span>';
+  });
   pl.forEach(function(r,i){
     var spent=(r.pay+r.bonus)>0?Math.min(100,r.out/(r.pay+r.bonus)*100):0;
     var tag=r.status==='Next payday'?'<span class="pill warn">Next payday</span>':r.status==='Current'?'<span class="pill pos">Current</span>':r.status==='Past'?'<span class="pill">Past</span>':'';
     h+='<details class="card pc"'+(i<2?' open':'')+'><summary><span class="range">'+fd(r.from)+' – '+fd(r.to)+' '+tag+'</span><span class="left" style="color:var(--'+(r.left<0?'neg':'pos')+')">'+m0(r.left)+'</span>'+
       '<span class="muted" style="font-size:12.5px">'+spent.toFixed(0)+'% of pay spent</span><span class="muted" style="font-size:12.5px;text-align:right">left over</span>'+
-      '<span class="bar"><i class="'+(r.out>r.pay+r.bonus?'over':'')+'" style="width:'+spent+'%"></i></span></summary><div class="det">'+
+      '<span class="bar"><i class="'+(r.out>r.pay+r.bonus?'over':'')+'" style="width:'+spent+'%"></i></span>'+(warn[i]||'')+'</summary><div class="det">'+
       '<div class="li"><span>Pay</span><span>'+m2(r.pay)+'</span></div>'+
       (r.bonus?'<div class="li"><span>Bonus / extra pay</span><span style="color:var(--pos)">+'+m2(r.bonus)+'</span></div>':'')+
       '<div class="li"><span>Planned bills</span><span>'+m2(r.planned)+'</span></div>'+
@@ -647,15 +655,17 @@ function lineChart(series,label,todayX,cid,mark){
 function helpQ(id,label){return '<button type="button" class="q" data-help="'+id+'" aria-expanded="false" aria-label="Help: '+label+'">?</button>'}
 function helpBox(id,html){return '<div class="helptext" id="help-'+id+'" hidden>'+html+'</div>'}
 var HELP_COMP='<p>How often the interest you earn is added to your balance, so it starts earning interest too.</p><p>Not sure? <b>Annually</b> is the safest choice, and it gives the most cautious projection. Many savings accounts add interest monthly or daily, which grows slightly faster.</p>';
+var HELP_APR='<p><b>APR</b> is the yearly interest rate on the debt. You can find it on your statement or loan paperwork.</p><p>It is charged monthly at one twelfth of the rate. For example, 24% APR is about 2% a month.</p>';
+var HELP_APRS='<p><b>APR</b> is the yearly rate your savings or investments earn. Use the rate on your account, or a cautious guess for investments.</p>';
 var HELP_STRAT='<p><b>Avalanche</b> puts extra money toward the highest interest rate first. It costs the least interest overall.</p><p><b>Snowball</b> puts extra money toward the smallest balance first. You clear debts sooner, which keeps you motivated.</p><p><b>Custom</b> uses the priority numbers you give each debt. 1 is paid first.</p><p><b>Minimums only</b> pays just the required minimums with nothing extra, so you can see the baseline.</p>';
 function viewSavings(){
   var v=S.sv,h='<section><h2>Savings inputs</h2><div class="card form"><div class="grid2">'+
     fld('Starting savings','sv0','number','start',v.start,'step="0.01" inputmode="decimal"')+
     fld('Balance as of','sv1','date','asOf',v.asOf,'')+
-    fld('Expected return (APR %)','sv2','number','apr',v.apr,'step="0.01" inputmode="decimal"')+
+    fld('Expected return (APR %)'+helpQ('aprs','APR'),'sv2','number','apr',v.apr,'step="0.01" inputmode="decimal"')+
     '<div class="field"><label for="sv3">Compounding'+helpQ('comp','Compounding')+'</label><select id="sv3" data-sv="comp">'+Object.keys(COMP).map(function(k){return '<option'+(k===v.comp?' selected':'')+'>'+k+'</option>'}).join('')+'</select></div>'+
     fld('Months ahead','sv4','number','months',v.months,'min="1" max="24" step="1" inputmode="numeric"')+
-    '</div>'+helpBox('comp',HELP_COMP)+'<span class="muted" style="display:block;margin-top:10px;font-size:12.5px">Balance as of: the date your starting savings amount was true. Any date works. Your last payday is the easiest choice.</span>'+(M.payDates(isoDN(v.asOf),isoDN(v.asOf))[0]&&M.payDates(isoDN(v.asOf),isoDN(v.asOf))[0].dn===isoDN(v.asOf)?'':'<div class="note">The balance date is not on a payday, so the first row is a partial pay period.</div>')+'</div></section>';
+    '</div>'+helpBox('comp',HELP_COMP)+helpBox('aprs',HELP_APRS)+'<span class="muted" style="display:block;margin-top:10px;font-size:12.5px">Balance as of: the date your starting savings amount was true. Any date works. Your last payday is the easiest choice.</span>'+(M.payDates(isoDN(v.asOf),isoDN(v.asOf))[0]&&M.payDates(isoDN(v.asOf),isoDN(v.asOf))[0].dn===isoDN(v.asOf)?'':'<div class="note">The balance date is not on a payday, so the first row is a partial pay period.</div>')+'</div></section>';
   h+='<section><h2>Monthly investing</h2><div class="card form"><div class="avail" id="svrem">'+sRem()+'</div>'+
     '<div class="field"><span class="lab">How much to invest each month</span><div class="seg" role="group" aria-label="Investing method"><button type="button" data-smode="fixed" aria-pressed="'+(v.mode==='fixed')+'">Fixed $</button><button type="button" data-smode="pct" aria-pressed="'+(v.mode!=='fixed')+'">% of leftover</button></div></div>'+
     (v.mode==='fixed'?'<div class="field"><label for="svf">Fixed amount per month</label><input id="svf" type="number" inputmode="decimal" min="0" step="0.01" data-sv="fixed" value="'+esc(v.fixed)+'"><span class="hint">Spread across your pay periods through the month.</span></div>'
@@ -691,7 +701,7 @@ function viewDebt(){
       (c.mode==='fixed'?'<div class="field"><label for="dx">Fixed extra per month</label><input id="dx" type="number" inputmode="decimal" min="0" step="0.01" data-dcfg="fixed" value="'+esc(c.fixed)+'"></div>'
         :'<div class="field"><label for="dp">Share of monthly leftover</label><input id="dp" type="number" inputmode="decimal" min="0" max="100" step="1" data-dcfg="pct" value="'+esc(c.pct)+'"><span class="hint">Percent of what is left after bills and minimum payments, month by month.</span></div>'))+'</div></section>';
   if(!D){
-    return h+'<section><div class="card empty">No debts yet. Add each loan or card with its balance, rate and minimum.'+(S.expenses.some(function(e){return e.freq==='Monthly'})?' Link a debt to a Monthly expense on Budget (such as a loan payment) and it takes that expense\'s amount and due day.':'')+'</div><div style="margin-top:10px"><button type="button" class="btn add" data-add-debt>+ Debt</button></div></section>';
+    return h+'<section><div class="card empty">No debts yet. Add each loan or card with its balance, rate and minimum.'+(S.expenses.some(function(e){return e.freq==='Monthly'})?' Each debt you add also gets a monthly payment in your Budget, or you can link it to one you already have.':'')+'</div><div style="margin-top:10px"><button type="button" class="btn add" data-add-debt>+ Debt</button></div></section>';
   }
   var sim=D.sim,base=D.base,ls=D.leftNow-sim.sumMin;
   h+='<section><h2>Summary</h2><div class="metrics">'+
@@ -812,13 +822,13 @@ function entrySheet(id){
 function debtSheet(id){
   var d=S.debts.filter(function(x){return x.id===id})[0],isNew=!d;
   if(isNew)d={id:uid(),name:'',type:'Credit Card',link:'',start:'',apr:'',min:'',due:'',prio:''};
-  var monthly=S.expenses.filter(function(e){return e.freq==='Monthly'});
+  var monthly=S.expenses.filter(function(e){return e.freq==='Monthly'&&(!M.linked[e.id]||M.linked[e.id]===d.id)});
   openSheet('<h3>'+(isNew?'New debt':'Edit debt')+'</h3><form id="df" class="form" style="padding:0" data-id="'+d.id+'" data-new="'+(isNew?1:0)+'">'+
     '<div class="grid2"><div class="field"><label for="dn">Debt name</label><input id="dn" required value="'+esc(d.name)+'" autocomplete="off"></div>'+
     '<div class="field"><label for="dt">Type</label><select id="dt">'+DTYPES.map(function(t){return '<option'+(t===d.type?' selected':'')+'>'+t+'</option>'}).join('')+'</select></div></div>'+
-    '<div class="field"><label for="dl">Link to Budget expense (optional)</label><select id="dl"><option value="">None</option>'+monthly.map(function(e){return '<option value="'+e.id+'"'+(e.id===d.link?' selected':'')+'>'+esc(e.title)+'</option>'}).join('')+'</select><span class="hint" id="dlh"></span></div>'+
+    '<div class="field"><label for="dl">Budget expense for the payment</label><select id="dl"><option value="new"'+(isNew?' selected':'')+'>Add as a new monthly expense</option>'+monthly.map(function(e){return '<option value="'+e.id+'"'+(e.id===d.link?' selected':'')+'>Use existing: '+esc(e.title)+'</option>'}).join('')+'<option value=""'+(!isNew&&!d.link?' selected':'')+'>Do not add to Budget</option></select><span class="hint" id="dlh"></span></div>'+
     '<div class="grid2"><div class="field"><label for="db">Current balance</label><input id="db" type="number" inputmode="decimal" step="0.01" min="0" required value="'+esc(d.start)+'"><span class="hint">From a recent statement. It counts down on its own as payments are made. Change it any time to match your statement.</span></div>'+
-    '<div class="field"><label for="dr">APR %</label><input id="dr" type="number" inputmode="decimal" step="0.01" min="0" value="'+esc(d.apr)+'"></div></div>'+
+    '<div class="field"><label for="dr">APR %'+helpQ('apr','APR')+'</label><input id="dr" type="number" inputmode="decimal" step="0.01" min="0" value="'+esc(d.apr)+'"></div></div>'+helpBox('apr',HELP_APR)+
     '<div class="grid2"><div class="field"><label for="dm">Minimum payment</label><input id="dm" type="number" inputmode="decimal" step="0.01" min="0" value="'+esc(d.min)+'"></div>'+
     '<div class="field"><label for="du">Due day (1-31)</label><input id="du" type="number" inputmode="numeric" step="1" min="1" max="31" value="'+esc(d.due)+'"></div></div>'+
     '<div class="field"><label for="dp2">Priority (Custom strategy)</label><input id="dp2" type="number" inputmode="numeric" step="1" min="1" max="20" value="'+esc(d.prio)+'"><span class="hint">1 is paid first.</span></div>'+
@@ -829,7 +839,7 @@ function syncDebt(){
   var l=$('dl');if(!l)return;var e=S.expenses.filter(function(x){return x.id===l.value})[0],on=!!e;
   $('dm').disabled=on;$('du').disabled=on;
   if(on){$('dm').value=num(e.amount);$('du').value=Math.round(num(e.due,1))||1}
-  $('dlh').textContent=on?'Minimum and due day come from Budget. Choose None to type your own.':'';
+  $('dlh').textContent=on?'Minimum and due day come from that Budget expense. To change them, edit the expense on Budget.':(l.value==='new'?'Adds a monthly expense to Budget using the minimum and due day below.':'This payment will not appear in your Budget.');
 }
 var WN=[];
 function wizard(step){
@@ -937,8 +947,10 @@ document.addEventListener('submit',function(ev){
     var j=S.entries.findIndex(function(x){return x.id===n.id});if(j<0)S.entries.push(n);else S.entries[j]=n;
     closeSheet();commit();toast(n.type==='bonus'?'Bonus saved':n.debt?'Extra payment saved':'Entry saved');
   }else if(f.id==='df'){
-    var dd={id:f.dataset.id,name:$('dn').value.trim(),type:$('dt').value,link:$('dl').value,start:num($('db').value),apr:num($('dr').value),
-      min:$('dl').value?'':num($('dm').value),due:$('dl').value?'':($('du').value===''?'':Math.min(31,Math.max(1,Math.round(num($('du').value))))),
+    var lv=$('dl').value,dnm=$('dn').value.trim(),mn0=num($('dm').value),du0=$('du').value===''?'':Math.min(31,Math.max(1,Math.round(num($('du').value))));
+    if(lv==='new'){var ne={id:uid(),title:dnm?dnm+' Payment':'Debt Payment',amount:mn0,freq:'Monthly',due:du0};S.expenses.push(ne);lv=ne.id}
+    var dd={id:f.dataset.id,name:dnm,type:$('dt').value,link:lv,start:num($('db').value),apr:num($('dr').value),
+      min:lv?'':mn0,due:lv?'':du0,
       prio:$('dp2').value===''?'':Math.round(num($('dp2').value))};
     var old=S.debts.filter(function(y){return y.id===dd.id})[0];dd.asOf=old&&old.asOf&&num(old.start)===dd.start?old.asOf:dnISO(monthStart(todayDN()));
     var x=S.debts.findIndex(function(y){return y.id===dd.id});if(x<0)S.debts.push(dd);else S.debts[x]=dd;
