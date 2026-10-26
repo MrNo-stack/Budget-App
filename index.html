@@ -380,7 +380,9 @@ function compute(S){
   function leftoverMonth(ms){
     if(lm[ms]!=null)return lm[ms];
     var me=addMonths(ms,1)-1,s=0;
-    periodsFrom(payDates(ms,me+maxEv+1),me).forEach(function(p){s+=pbase(p).leftBase});
+    payDates(ms,me).forEach(function(x){s+=x.amt});
+    s-=range(ms,me,dayPlan,exPlan).tot;
+    S.entries.forEach(function(en){var dn=isoDN(en.date);if(isNaN(dn)||dn<ms||dn>me)return;var a=num(en.amount);if(en.type==='bonus')s+=a;else if(!en.debt)s-=a});
     return lm[ms]=s;
   }
   var mpc={};
@@ -421,6 +423,7 @@ function compute(S){
       if(poolT>0){
         var yb=dnDate(ms).getUTCFullYear(),mb=dnDate(ms).getUTCMonth(),ms2=addMonths(ms,1),y2=dnDate(ms2).getUTCFullYear(),mb2=dnDate(ms2).getUTCMonth(),nd2=dim(y2,mb2);
         PP=monthPeriods(ms).filter(function(p){return ms<monthStart(T)||p.from>=T});
+        var raws=[];
         var caps=PP.map(function(p){
           var c=p.leftBase;
           DB.forEach(function(dbt,i){
@@ -429,9 +432,9 @@ function compute(S){
             if(stamps[i]<=ms2&&rem[i]>0&&dB>=p.from&&dB<=p.to)c-=mins[i];
             c-=lumpRaw(dbt.id,p.from,p.to);
           });
-          return Math.max(0,c);
+          raws.push(c);return Math.max(0,c);
         });
-        xs=spread(poolT,caps);
+        xs=spread(Math.min(poolT,Math.max(0,leftoverMonth(ms)-sumMp-lump.reduce(function(t4,x){return t4+x},0))),caps);
       }
       var pool=xs.reduce(function(t3,x){return t3+x},0),voidAmt=poolT-pool;
       rk.forEach(function(i){if(!A[i])return;var a=Math.max(0,Math.min(rem[i],pool));alloc[i]=a;pool-=a});
@@ -486,13 +489,21 @@ function compute(S){
   /* ---- savings ---- */
   var sv=[],sstart=isoDN(S.sv.asOf);if(isNaN(sstart))sstart=lastPay;
   var slim=addMonths(T,Math.round(num(S.sv.months,12))),n=COMP[S.sv.comp]||12,apr=num(S.sv.apr)/100,open=num(S.sv.start);
-  periods(sstart,slim).slice(0,400).forEach(function(p){
-    var r2=period(p),iso=dnISO(p.from),act=S.sv.actual[iso];
+  var svRows=periods(sstart,slim).slice(0,400).map(function(p){var r2=period(p);r2.p=p;return r2}),svGrp={};
+  svRows.forEach(function(r2){var d3=dnDate(r2.from),k3=d3.getUTCFullYear()*12+d3.getUTCMonth();(svGrp[k3]=svGrp[k3]||[]).push(r2)});
+  Object.keys(svGrp).forEach(function(k3){
+    var G=svGrp[k3],pc=Math.min(100,Math.max(0,num(S.sv.pct,100)))/100;
+    var ms3=toDN(Math.floor(k3/12),k3%12,1),sm=simP&&simP.months.filter(function(m){return m.ms===ms3}).pop();
+    var L3=leftoverMonth(ms3)-(sm?(sm.mins||0)+(sm.lump||0):0),n3=Math.max(1,monthPeriods(ms3).length),I3=L3>0?L3*pc:L3;
+    G.forEach(function(r2){
+      if(S.sv.mode==='fixed'){var pl=0;for(var q2=r2.from;q2<=r2.to;q2++){var dt2=dnDate(q2);pl+=num(S.sv.fixed)/dim(dt2.getUTCFullYear(),dt2.getUTCMonth())}r2.planSave=pl}
+      else r2.planSave=I3/n3;
+    });
+  });
+  svRows.forEach(function(r2){
+    var p=r2.p,iso=dnISO(p.from),act=S.sv.actual[iso];
     var hasAct=act!==undefined&&act!==''&&act!==null&&!isNaN(parseFloat(act));
-    var plan0;
-    if(S.sv.mode==='fixed'){plan0=0;for(var q2=p.from;q2<=p.to;q2++){var dt2=dnDate(q2);plan0+=num(S.sv.fixed)/dim(dt2.getUTCFullYear(),dt2.getUTCMonth())}}
-    else{var base0=r2.left+r2.debtEx;plan0=base0>0?base0*Math.min(100,Math.max(0,num(S.sv.pct,100)))/100:r2.left}
-    var saved=hasAct?parseFloat(act):plan0;r2.planSave=plan0;
+    var saved=hasAct?parseFloat(act):r2.planSave;
     var interest=open*(Math.pow(1+apr/n,n*(p.to-p.from+1)/365)-1);
     var close=open+interest+saved;
     r2.iso=iso;r2.actual=hasAct?parseFloat(act):null;r2.saved=saved;r2.interest=interest;r2.open=open;r2.close=close;r2.status=status(r2);
@@ -521,7 +532,7 @@ function compute(S){
   }
   var leftNow=leftoverMonth(ms0),cm=null;
   if(simP){var kk2=Math.max(0,monthsBetween(simP.asOf,ms0));cm=simP.months[kk2+1]||null}
-  var dAvail=leftNow-(cm?cm.mins+cm.lump:0);
+  var dAvail=leftNow-(cm?(cm.mins||0)+(cm.lump||0):0);
   var dExtra=cfg.strategy==='Minimums only'?0:(cm?cm.extra:0);
   var dVoid=cm&&cm.void?cm.void:0;
   var sAvail=dAvail-dExtra;
